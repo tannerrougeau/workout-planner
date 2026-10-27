@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { History } from "./History";
 import { LogWorkout } from "./LogWorkout";
 import { Onboarding } from "./Onboarding";
@@ -95,6 +95,17 @@ function PlanView({
   const [screen, setScreen] = useState<Screen>({ kind: "plan" });
   const [selected, setSelected] = useState(() => defaultDay(plan, today));
   const [dismissed, setDismissed] = useState<string[]>([]);
+  // The last swapped-out exercise, offered back for a few seconds in case the tap was a slip.
+  const [undoSwap, setUndoSwap] = useState<string | undefined>();
+  useEffect(() => {
+    if (!undoSwap) return;
+    const id = window.setTimeout(() => setUndoSwap(undefined), 6000);
+    return () => window.clearTimeout(id);
+  }, [undoSwap]);
+  const swapOut = (name: string) => {
+    onChange({ ...profile, excluded: [...excluded, name] });
+    setUndoSwap(name);
+  };
   const [draft, setDraft] = useState(() => loadDraft());
   const draftDay = draft ? plan.days.findIndex((d) => d.weekday === draft.weekday && d.title === draft.dayTitle) : -1;
   const week = weeklyProgress(sessions, plan.days.length, new Date());
@@ -297,7 +308,7 @@ function PlanView({
                     className="icon-btn"
                     title="Swap for a different exercise"
                     aria-label={`Swap out ${ex.name}`}
-                    onClick={() => onChange({ ...profile, excluded: [...excluded, ex.name] })}
+                    onClick={() => swapOut(ex.name)}
                   >
                     ⇄
                   </button>
@@ -337,6 +348,21 @@ function PlanView({
           <p><strong>Cool-down:</strong> {plan.coolDown}</p>
         </div>
       </details>
+      {undoSwap && (
+        <div className="toast" role="status">
+          <span>{undoSwap} removed from your plan.</span>
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              onChange({ ...profile, excluded: excluded.filter((n) => n !== undoSwap) });
+              setUndoSwap(undefined);
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
       {tab("plan")}
     </div>
   );

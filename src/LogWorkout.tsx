@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { Level } from "./exercises";
-import type { WorkoutDay } from "./planner";
+import type { PlannedExercise, WorkoutDay } from "./planner";
 import { VideoButton } from "./VideoButton";
 import { formatWeight, measureOf, nextTarget, personalBests, recentLogs, sessionVolume, setsToLog, takesWeight } from "./progress";
 import {
   clearDraft,
+  matchDraftEntries,
   newId,
   saveDraft,
   toLocalDate,
@@ -36,19 +37,24 @@ const FEELINGS: { value: Feeling; label: string }[] = [
 
 const MEASURE_LABEL = { reps: "Reps", seconds: "Secs", rounds: "Rounds" } as const;
 
-function freshDraft(day: WorkoutDay, sessions: SessionLog[], units: Units): Draft {
+function freshEntry(ex: PlannedExercise, sessions: SessionLog[], units: Units): DraftEntry {
+  const weight = nextTarget(ex, sessions, units)?.weight ?? recentLogs(ex.name, sessions, 1)[0]?.weight;
+  return {
+    name: ex.name,
+    weight: weight !== undefined ? String(weight) : "",
+    sets: Array.from({ length: setsToLog(ex) }, () => ({ value: "", done: false })),
+    trouble: false,
+  };
+}
+
+/** Resumes a saved workout where its exercises still match by name; anything new starts fresh. */
+function startDraft(day: WorkoutDay, sessions: SessionLog[], units: Units, resumed?: Draft): Draft {
+  const matched = resumed ? matchDraftEntries(resumed, day.exercises.map((ex) => ({ name: ex.name, sets: setsToLog(ex) }))) : [];
   return {
     weekday: day.weekday,
     dayTitle: day.title,
-    startedAt: Date.now(),
-    entries: day.exercises.map((ex) => {
-      const weight = nextTarget(ex, sessions, units)?.weight ?? recentLogs(ex.name, sessions, 1)[0]?.weight;
-      return {
-        weight: weight !== undefined ? String(weight) : "",
-        sets: Array.from({ length: setsToLog(ex) }, () => ({ value: "", done: false })),
-        trouble: false,
-      };
-    }),
+    startedAt: resumed && matched.some(Boolean) ? resumed.startedAt : Date.now(),
+    entries: day.exercises.map((ex, i) => matched[i] ?? freshEntry(ex, sessions, units)),
   };
 }
 
@@ -79,9 +85,7 @@ function useWakeLock() {
 }
 
 export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnitsChange, onSave, onClose }: Props) {
-  const [draft, setDraft] = useState<Draft>(() =>
-    resumed && resumed.entries.length === day.exercises.length ? resumed : freshDraft(day, sessions, units),
-  );
+  const [draft, setDraft] = useState<Draft>(() => startDraft(day, sessions, units, resumed));
   const [phase, setPhase] = useState<"workout" | "finish">("workout");
   const [restEnd, setRestEnd] = useState<number | undefined>();
   const [now, setNow] = useState(Date.now());
