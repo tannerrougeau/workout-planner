@@ -1,17 +1,28 @@
 import { useMemo, useState } from "react";
+import { History } from "./History";
+import { LogWorkout } from "./LogWorkout";
 import { Onboarding } from "./Onboarding";
 import { EQUIPMENT, FOCUS_AREAS, GOALS, LEVELS, LIMITATIONS, labelOf } from "./options";
 import { generatePlan } from "./planner";
 import { DEFAULT_PROFILE, clearProfile, loadProfile, saveProfile, type UserProfile } from "./profile";
+import { cyclePosition, nextTarget, suggestions, type Suggestion } from "./progress";
+import { fromLocalDate, loadSessions, saveSessions, sortByDate, type SessionLog } from "./workoutLog";
 
 export function App() {
   const [profile, setProfile] = useState<UserProfile | null>(() => loadProfile());
   const [editing, setEditing] = useState(false);
+  const [sessions, setSessions] = useState<SessionLog[]>(() => loadSessions());
 
   const save = (next: UserProfile) => {
     saveProfile(next);
     setProfile(next);
     setEditing(false);
+  };
+
+  const updateSessions = (next: SessionLog[]) => {
+    const sorted = sortByDate(next);
+    saveSessions(sorted);
+    setSessions(sorted);
   };
 
   if (!profile || editing) {
@@ -29,7 +40,9 @@ export function App() {
   return (
     <PlanView
       profile={profile}
+      sessions={sessions}
       onChange={save}
+      onSessionsChange={updateSessions}
       onEdit={() => setEditing(true)}
       onReset={() => {
         clearProfile();
@@ -39,27 +52,103 @@ export function App() {
   );
 }
 
+type Screen = { kind: "plan" } | { kind: "history" } | { kind: "log"; day: number };
+
 function PlanView({
   profile,
+  sessions,
   onChange,
+  onSessionsChange,
   onEdit,
   onReset,
 }: {
   profile: UserProfile;
+  sessions: SessionLog[];
   onChange: (profile: UserProfile) => void;
+  onSessionsChange: (sessions: SessionLog[]) => void;
   onEdit: () => void;
   onReset: () => void;
 }) {
   const plan = useMemo(() => generatePlan(profile), [profile]);
   const excluded = profile.excluded ?? [];
   const name = profile.name.trim();
+  const [screen, setScreen] = useState<Screen>({ kind: "plan" });
+  const [dismissed, setDismissed] = useState<string[]>([]);
+
+  const cycle = cyclePosition(plan.progression.weeks, sessions, new Date());
+  const tips = suggestions(sessions, profile.level, excluded).filter((s) => !dismissed.includes(s.text));
+  const lastLogged = (title: string, weekday: string) =>
+    [...sessions].reverse().find((s) => s.dayTitle === title && s.weekday === weekday)?.date;
+
+  const act = (s: Suggestion) => {
+    if (s.kind === "levelUp") onChange({ ...profile, level: s.level });
+    else if (s.kind === "swap") onChange({ ...profile, excluded: [...excluded, s.exercise] });
+    setDismissed([...dismissed, s.text]);
+  };
+
+  if (screen.kind === "log") {
+    return (
+      <div className="app">
+        <LogWorkout
+          day={plan.days[screen.day]}
+          level={profile.level}
+          units={profile.units}
+          sessions={sessions}
+          onUnitsChange={(units) => onChange({ ...profile, units })}
+          onCancel={() => setScreen({ kind: "plan" })}
+          onSave={(session) => {
+            onSessionsChange([...sessions, session]);
+            setScreen({ kind: "plan" });
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (screen.kind === "history") {
+    return (
+      <div className="app">
+        <History
+          sessions={sessions}
+          units={profile.units}
+          onDelete={(id) => onSessionsChange(sessions.filter((s) => s.id !== id))}
+          onClose={() => setScreen({ kind: "plan" })}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
-      <header>
-        <h1>{name ? `${name}'s plan` : "Your plan"}</h1>
-        <p>{plan.splitName} · {plan.days.length} days/week · {labelOf(GOALS, profile.goal)}</p>
+      <header className="plan-header">
+        <div>
+          <h1>{name ? `${name}'s plan` : "Your plan"}</h1>
+          <p>{plan.splitName} · {plan.days.length} days/week · {labelOf(GOALS, profile.goal)}</p>
+        </div>
+        <button type="button" className="secondary" onClick={() => setScreen({ kind: "history" })}>
+          Progress{sessions.length > 0 && ` (${sessions.length})`}
+        </button>
       </header>
+
+      <div className="banner">
+        {cycle ? (
+          <p>
+            <strong>Week {cycle.week} of {cycle.cycleLength}</strong> · {plan.progression.weeks[cycle.index].effort}: {plan.progression.weeks[cycle.index].detail}
+            {cycle.lightNext && " Next week is a lighter recovery week."}
+          </p>
+        ) : (
+          <p>Log your first workout to start tracking your progress. The app then sets a target for each exercise.</p>
+        )}
+        {tips.map((s) => (
+          <div key={s.text} className="suggestion">
+            <span>{s.text}</span>
+            {(s.kind === "levelUp" || s.kind === "swap") && (
+              <button type="button" className="link" onClick={() => act(s)}>{s.kind === "levelUp" ? `Move up to ${s.level}` : "Swap it"}</button>
+            )}
+            <button type="button" className="link quiet" onClick={() => setDismissed([...dismissed, s.text])}>Dismiss</button>
+          </div>
+        ))}
+      </div>
 
       <main>
         <aside className="panel">
@@ -116,15 +205,25 @@ function PlanView({
                   <span className="weekday">{day.weekday}</span> {day.title}
                   <span className="duration">~{day.estimatedMinutes} min</span>
                 </h3>
+                <div className="day-actions">
+                  <button type="button" className="primary small" onClick={() => setScreen({ kind: "log", day: i })}>Log workout</button>
+                  {(() => {
+                    const last = lastLogged(day.title, day.weekday);
+                    return last && <span className="last-logged">Last logged {fromLocalDate(last).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>;
+                  })()}
+                </div>
                 <table>
                   <thead>
                     <tr><th>Exercise</th><th>Sets</th><th>Reps</th><th>Rest</th><th /></tr>
                   </thead>
                   <tbody>
-                    {day.exercises.map((ex) => (
+                    {day.exercises.map((ex) => {
+                      const target = nextTarget(ex, sessions, profile.units);
+                      return (
                       <tr key={ex.name}>
                         <td>
                           {ex.name}
+                          {target && <div className="next">Next: {target.text}</div>}
                           <div className="hint">{ex.progression}</div>
                         </td>
                         <td>{ex.sets}</td>
@@ -142,7 +241,8 @@ function PlanView({
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </article>
@@ -162,8 +262,8 @@ function PlanView({
                 <tr><th>When</th><th>Effort</th><th>What to do</th></tr>
               </thead>
               <tbody>
-                {plan.progression.weeks.map((w) => (
-                  <tr key={w.week}>
+                {plan.progression.weeks.map((w, i) => (
+                  <tr key={w.week} className={cycle?.index === i ? "current" : undefined}>
                     <td>{w.week}</td>
                     <td>{w.effort}</td>
                     <td>{w.detail}</td>
