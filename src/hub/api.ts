@@ -1,5 +1,5 @@
 import { db, HUB_CONFIG } from "./config";
-import { mediaKind, type LatLng } from "./format";
+import type { LatLng } from "./format";
 
 export interface HubEvent {
   id: string;
@@ -30,7 +30,7 @@ export interface HubPost {
   event_title: string | null;
   body: string;
   media_path: string | null;
-  media_type: "image" | "video" | null;
+  media_type: "image" | null;
   created_at: string;
 }
 
@@ -39,6 +39,7 @@ export interface NewEvent {
   activity: string;
   description: string;
   starts_at: string;
+  time_zone: string;
   duration_min: number;
   place_name: string;
   lat: number;
@@ -135,7 +136,7 @@ export async function joinWithCode(id: string, code: string): Promise<void> {
   fail((await db().rpc("join_event_with_code", { eid: id, code })).error);
 }
 
-/** Notifies opted-in people near the event. Returns how many devices were reached. */
+/** Alerts opted-in people near the event by phone and/or email. Returns how many alerts went out. */
 export async function promoteEvent(id: string): Promise<number> {
   const { data, error } = await db().functions.invoke("notify-nearby", { body: { event_id: id } });
   if (error) {
@@ -160,12 +161,12 @@ export function mediaUrl(path: string): string {
 }
 
 export async function createPost(userId: string, body: string, file?: File, eventId?: string): Promise<void> {
-  let media: { media_path: string; media_type: "image" | "video" } | undefined;
+  let media: { media_path: string; media_type: "image" } | undefined;
   if (file) {
     const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
     const path = `${userId}/${crypto.randomUUID()}.${ext}`;
     fail((await db().storage.from("media").upload(path, file, { contentType: file.type })).error);
-    media = { media_path: path, media_type: mediaKind(file.type) };
+    media = { media_path: path, media_type: "image" };
   }
   const { error } = await db().from("posts").insert({ body: body.trim(), event_id: eventId ?? null, ...media });
   if (error && media) await db().storage.from("media").remove([media.media_path]);
@@ -207,10 +208,12 @@ export interface NotifyPrefs {
   lat: number;
   lng: number;
   radius_km: number;
+  push: boolean;
+  email: boolean;
 }
 
 export async function getNotifyPrefs(): Promise<NotifyPrefs | undefined> {
-  const { data, error } = await db().from("notify_prefs").select("enabled, lat, lng, radius_km").maybeSingle();
+  const { data, error } = await db().from("notify_prefs").select("enabled, lat, lng, radius_km, push, email").maybeSingle();
   fail(error);
   return (data ?? undefined) as NotifyPrefs | undefined;
 }

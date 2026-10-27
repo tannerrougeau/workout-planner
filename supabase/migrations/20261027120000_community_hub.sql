@@ -1,5 +1,5 @@
--- Community hub: profiles, events with RSVPs and invite links, posts with photos/videos,
--- reports and blocks, and opt-in notifications about new events nearby.
+-- Community hub: profiles, events with RSVPs and invite links, posts with photos,
+-- reports and blocks, and opt-in phone and email alerts about new events nearby.
 -- Every table has row level security; clients only ever use the public anon key.
 
 create extension if not exists postgis with schema extensions;
@@ -38,6 +38,8 @@ create table public.events (
   activity text not null check (char_length(activity) between 2 and 40),
   description text not null default '' check (char_length(description) <= 2000),
   starts_at timestamptz not null,
+  -- The organizer's IANA time zone, so alert emails show the local start time.
+  time_zone text not null default 'UTC' check (char_length(time_zone) between 1 and 64),
   duration_min int not null default 60 check (duration_min between 10 and 600),
   place_name text not null check (char_length(place_name) between 2 and 120),
   lat double precision not null check (lat between -90 and 90),
@@ -82,9 +84,9 @@ create policy "owners delete events" on public.events for delete to authenticate
 
 -- Owners can't touch the invite code or the "already promoted" marker.
 revoke insert, update on public.events from anon, authenticated;
-grant insert (title, activity, description, starts_at, duration_min, place_name, lat, lng, capacity, visibility)
+grant insert (title, activity, description, starts_at, time_zone, duration_min, place_name, lat, lng, capacity, visibility)
   on public.events to authenticated;
-grant update (title, activity, description, starts_at, duration_min, place_name, lat, lng, capacity, visibility, cancelled)
+grant update (title, activity, description, starts_at, time_zone, duration_min, place_name, lat, lng, capacity, visibility, cancelled)
   on public.events to authenticated;
 
 alter table public.event_members enable row level security;
@@ -161,7 +163,7 @@ language sql stable security invoker set search_path = '' as $$
   limit 200;
 $$;
 
--- Posts with photos and videos --------------------------------------------
+-- Posts with photos ------------------------------------------------------
 
 create table public.posts (
   id uuid primary key default gen_random_uuid(),
@@ -169,7 +171,7 @@ create table public.posts (
   event_id uuid references public.events on delete cascade,
   body text not null default '' check (char_length(body) <= 1000),
   media_path text,
-  media_type text check (media_type in ('image', 'video')),
+  media_type text check (media_type = 'image'),
   created_at timestamptz not null default now(),
   check (body <> '' or media_path is not null),
   check ((media_path is null) = (media_type is null))
@@ -231,10 +233,9 @@ alter table public.blocks enable row level security;
 create policy "manage your own blocks" on public.blocks for all to authenticated
   using (blocker_id = (select auth.uid())) with check (blocker_id = (select auth.uid()));
 
--- Media storage: public read by URL, upload only into your own folder, 50 MB cap.
+-- Photo storage: public read by URL, upload only into your own folder, 10 MB cap.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('media', 'media', true, 52428800,
-  array['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime', 'video/webm'])
+values ('media', 'media', true, 10485760, array['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 on conflict (id) do nothing;
 
 create policy "upload media to your own folder" on storage.objects for insert to authenticated
@@ -242,7 +243,7 @@ create policy "upload media to your own folder" on storage.objects for insert to
 create policy "delete your own media" on storage.objects for delete to authenticated
   using (bucket_id = 'media' and owner = (select auth.uid()));
 
--- Nearby-event notifications --------------------------------------------
+-- Nearby-event alerts by phone notification and/or email ------------------
 
 create table public.notify_prefs (
   user_id uuid primary key default auth.uid() references public.profiles on delete cascade,
@@ -253,7 +254,10 @@ create table public.notify_prefs (
   location extensions.geography(point, 4326)
     generated always as (extensions.st_setsrid(extensions.st_makepoint(lng, lat), 4326)::extensions.geography) stored,
   radius_km int not null default 25 check (radius_km in (5, 10, 25, 50)),
-  updated_at timestamptz not null default now()
+  push boolean not null default true,
+  email boolean not null default false,
+  updated_at timestamptz not null default now(),
+  check (push or email)
 );
 alter table public.notify_prefs enable row level security;
 create policy "manage your own notification settings" on public.notify_prefs for all to authenticated
@@ -270,11 +274,16 @@ alter table public.push_subscriptions enable row level security;
 create policy "manage your own devices" on public.push_subscriptions for all to authenticated
   using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
--- Who to notify about an event: opted in, within their chosen radius, not the organizer,
--- and not someone who blocked the organizer. Only the notify-nearby function may call it.
-create function public.users_to_notify(eid uuid) returns table (user_id uuid)
+-- Who to alert about an event and how: opted in, within their chosen radius, not the organizer,
+-- and not someone who blocked the organizer. Email addresses come from auth and never reach
+-- the app; only the notify-nearby function (service role) may call this.
+create function public.users_to_notify(eid uuid)
+returns table (user_id uuid, push boolean, email boolean, email_address text)
 language sql stable security definer set search_path = '' as $$
-  select n.user_id from public.notify_prefs n join public.events e on e.id = eid
+  select n.user_id, n.push, n.email, u.email::text
+  from public.notify_prefs n
+  join public.events e on e.id = eid
+  join auth.users u on u.id = n.user_id
   where n.enabled and n.user_id <> e.owner_id
     and extensions.st_dwithin(n.location, e.location, n.radius_km * 1000)
     and not exists (select 1 from public.blocks b where b.blocker_id = n.user_id and b.blocked_id = e.owner_id);

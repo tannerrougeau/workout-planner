@@ -101,7 +101,7 @@ function SignIn({ invited }: { invited: boolean }) {
       </header>
       <div className="hero">
         <h2>{invited ? "You've been invited to a workout" : "Train with people near you"}</h2>
-        <p className="hero-meta">Find and join meetups for your sport or favorite style, organize your own, and share photos and videos from the session.</p>
+        <p className="hero-meta">Find and join meetups for your sport or favorite style, organize your own, and share photos from the session.</p>
         {sent ? (
           <p className="ok">Check {email} for a sign-in link. Open it on this device to continue.</p>
         ) : (
@@ -394,17 +394,28 @@ function SettingsSection({ userId }: { userId: string }) {
     }
   };
 
-  const turnOnAlerts = () =>
-    run(async () => {
-      const sub = await subscribeDevice();
-      const spot = roundToKm(await currentPosition());
-      const next = { enabled: true, ...spot, radius_km: radius };
-      await saveDevice(userId, sub);
-      await saveNotifyPrefs(userId, next);
-      setPrefs(next);
-    }, "Alerts are on for this device.");
+  const [wantPush, setWantPush] = useState(true);
+  const [wantEmail, setWantEmail] = useState(false);
+  useEffect(() => {
+    if (prefs) {
+      setWantPush(prefs.push);
+      setWantEmail(prefs.email);
+    }
+  }, [prefs]);
 
   const problem = pushProblem();
+  const pushBlocked = Boolean(problem);
+
+  const saveAlerts = () =>
+    run(async () => {
+      const push = wantPush && !pushBlocked;
+      if (!push && !wantEmail) throw new Error("Choose phone notifications, email, or both.");
+      if (push) await saveDevice(userId, await subscribeDevice());
+      const spot = roundToKm(await currentPosition());
+      const next = { enabled: true, ...spot, radius_km: radius, push, email: wantEmail };
+      await saveNotifyPrefs(userId, next);
+      setPrefs(next);
+    }, "Event alerts are on.");
 
   return (
     <>
@@ -420,27 +431,37 @@ function SettingsSection({ userId }: { userId: string }) {
 
       <div className="card">
         <h2>Event alerts</h2>
-        <p className="muted">Get a notification when someone near you publishes an event. Your location is rounded to about 1 km and never shown to anyone.</p>
+        <p className="muted">Hear about new events near you. Your location is rounded to about 1 km and never shown to anyone, and your email address is never shared.</p>
+        <fieldset className="field plain">
+          <legend>Send alerts by</legend>
+          <label className="check">
+            <input id="alert-push" type="checkbox" checked={wantPush && !pushBlocked} disabled={pushBlocked} onChange={(e) => setWantPush(e.target.checked)} />
+            Phone notification
+          </label>
+          {problem && <p className="muted">{problem}</p>}
+          <label className="check">
+            <input id="alert-email" type="checkbox" checked={wantEmail} onChange={(e) => setWantEmail(e.target.checked)} />
+            Email
+          </label>
+        </fieldset>
         <label className="inline">
           Within
           <select id="alert-radius" value={radius} onChange={(e) => setRadius(Number(e.target.value))}>
             {RADII.map((r) => <option key={r} value={r}>{r} km</option>)}
           </select>
         </label>
-        {problem ? (
-          <p className="warn">{problem}</p>
-        ) : prefs?.enabled ? (
-          <div className="tip-actions">
-            <button type="button" className="secondary small" disabled={busy} onClick={turnOnAlerts}>Update location and distance</button>
+        <div className="tip-actions">
+          <button type="button" className="primary small" disabled={busy || (!(wantPush && !pushBlocked) && !wantEmail)} onClick={saveAlerts}>
+            {prefs?.enabled ? "Save alert settings" : "Turn on event alerts"}
+          </button>
+          {prefs?.enabled && (
             <button type="button" className="ghost small" disabled={busy} onClick={() => run(async () => {
               const next = { ...prefs, enabled: false };
               await saveNotifyPrefs(userId, next);
               setPrefs(next);
-            }, "Alerts are off.")}>Turn off</button>
-          </div>
-        ) : (
-          <button type="button" className="primary small" disabled={busy} onClick={turnOnAlerts}>Turn on event alerts</button>
-        )}
+            }, "Event alerts are off.")}>Turn off</button>
+          )}
+        </div>
       </div>
 
       {blocked.length > 0 && (

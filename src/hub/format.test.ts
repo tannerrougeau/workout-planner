@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { distanceKm, eventLink, eventStatus, formatDistance, mediaProblem, parseEventLink, roundToKm } from "./format";
+import { distanceKm, eventLink, eventStatus, formatDistance, photoProblem, parseEventLink, roundToKm } from "./format";
 
 const ID = "3f2b9a64-1c2d-4e5f-8a9b-0c1d2e3f4a5b";
 
@@ -37,15 +37,16 @@ describe("distances", () => {
   });
 });
 
-describe("mediaProblem", () => {
-  it("accepts photos and videos within the size limit", () => {
-    expect(mediaProblem({ type: "image/jpeg", size: 3_000_000 })).toBeUndefined();
-    expect(mediaProblem({ type: "video/mp4", size: 40 * 1024 * 1024 })).toBeUndefined();
+describe("photoProblem", () => {
+  it("accepts photos within the size limit", () => {
+    expect(photoProblem({ type: "image/jpeg", size: 3_000_000 })).toBeUndefined();
+    expect(photoProblem({ type: "image/webp", size: 9 * 1024 * 1024 })).toBeUndefined();
   });
 
-  it("rejects other file types and files over 50 MB", () => {
-    expect(mediaProblem({ type: "application/pdf", size: 1000 })).toMatch(/photo|video/i);
-    expect(mediaProblem({ type: "video/mp4", size: 51 * 1024 * 1024 })).toMatch(/50 MB/);
+  it("rejects videos, other files and photos over 10 MB", () => {
+    expect(photoProblem({ type: "video/mp4", size: 1000 })).toMatch(/photo/i);
+    expect(photoProblem({ type: "application/pdf", size: 1000 })).toMatch(/photo/i);
+    expect(photoProblem({ type: "image/png", size: 11 * 1024 * 1024 })).toMatch(/10 MB/);
   });
 });
 

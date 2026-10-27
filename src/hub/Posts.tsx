@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { block, createPost, deletePost, mediaUrl, report, type HubPost } from "./api";
-import { mediaProblem } from "./format";
+import { photoProblem } from "./format";
 
 const ago = (iso: string) => {
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -27,7 +27,7 @@ export function Composer({ userId, eventId, onPosted }: { userId: string; eventI
       setPreview(undefined);
       return;
     }
-    const problem = mediaProblem(f);
+    const problem = photoProblem(f);
     if (problem) {
       setError(problem);
       return;
@@ -72,23 +72,23 @@ export function Composer({ userId, eventId, onPosted }: { userId: string; eventI
       />
       {preview && file && (
         <div className="composer-media">
-          {file.type.startsWith("video/") ? <video src={preview} controls playsInline /> : <img src={preview} alt="Selected photo" />}
+          <img src={preview} alt="Selected photo" />
           <button type="button" className="ghost small" onClick={() => choose(undefined)}>Remove</button>
         </div>
       )}
       {error && <p className="warn">{error}</p>}
       <div className="composer-actions">
         <label className="secondary small file-btn">
-          Photo or video
+          Add photo
           <input
             ref={input}
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm"
+            accept="image/jpeg,image/png,image/webp,image/gif"
             onChange={(e) => choose(e.target.files?.[0])}
           />
         </label>
         <button type="submit" className="primary small" disabled={busy || (!body.trim() && !file)}>
-          {busy ? (file ? "Uploading…" : "Posting…") : "Post"}
+          {busy ? "Posting…" : "Post"}
         </button>
       </div>
     </form>
@@ -163,8 +163,7 @@ function PostCard({
         </button>
       </div>
       {post.body && <p className="post-body">{post.body}</p>}
-      {post.media_path && post.media_type === "image" && <img className="post-media" src={mediaUrl(post.media_path)} alt={`Photo shared by ${post.author_name}`} loading="lazy" />}
-      {post.media_path && post.media_type === "video" && <video className="post-media" src={mediaUrl(post.media_path)} controls playsInline preload="metadata" />}
+      {post.media_path && <img className="post-media" src={mediaUrl(post.media_path)} alt={`Photo shared by ${post.author_name}`} loading="lazy" />}
 
       {menu === "open" && (
         <div className="post-menu">

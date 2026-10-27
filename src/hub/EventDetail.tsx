@@ -119,11 +119,11 @@ export function EventDetail({ id, userId, onBack }: { id: string; userId: string
           {isOwner && event.visibility === "public" && !event.notified_at && status === "open" && (
             <button type="button" className="secondary" disabled={busy} onClick={() => act(async () => {
               const sent = await promoteEvent(event.id);
-              setMessage(sent > 0 ? `Notified ${sent} ${sent === 1 ? "device" : "devices"} nearby.` : "Promoted. Nobody nearby has alerts on yet.");
-            })}>Notify people nearby</button>
+              setMessage(sent > 0 ? `Sent ${sent} ${sent === 1 ? "alert" : "alerts"} to people nearby.` : "Promoted. Nobody nearby has alerts on yet.");
+            })}>Alert people nearby</button>
           )}
         </div>
-        {event.notified_at && isOwner && <p className="muted">People nearby with alerts on were notified.</p>}
+        {event.notified_at && isOwner && <p className="muted">People nearby with alerts on were alerted.</p>}
         {message && <p className="ok">{message}</p>}
         {error && <p className="warn">{error}</p>}
       </div>
@@ -144,7 +144,7 @@ export function EventDetail({ id, userId, onBack }: { id: string; userId: string
         </ul>
       </div>
 
-      <h2 className="section-title">Photos and videos</h2>
+      <h2 className="section-title">Photos</h2>
       {(event.joined || isOwner) && <Composer userId={userId} eventId={event.id} onPosted={load} />}
       <PostList posts={posts} userId={userId} eventOwnerId={event.owner_id} onChanged={load} />
 

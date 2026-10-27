@@ -1,4 +1,4 @@
-/** Pure helpers for the hub: links, distances, media checks and event status. */
+/** Pure helpers for the hub: links, distances, photo checks and event status. */
 
 export interface LatLng {
   lat: number;
@@ -42,21 +42,14 @@ export function parseEventLink(search: string): { eventId: string; code?: string
   return code && /^[0-9a-f]{12}$/i.test(code) ? { eventId, code } : { eventId };
 }
 
-export const MAX_MEDIA_MB = 50;
-const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-const VIDEO_TYPES = ["video/mp4", "video/quicktime", "video/webm"];
+export const MAX_PHOTO_MB = 10;
+const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 /** Why a file can't be posted, or undefined if it can. */
-export function mediaProblem(file: { type: string; size: number }): string | undefined {
-  if (![...IMAGE_TYPES, ...VIDEO_TYPES].includes(file.type)) {
-    return "Use a JPG, PNG, WebP or GIF photo, or an MP4, MOV or WebM video.";
-  }
-  if (file.size > MAX_MEDIA_MB * 1024 * 1024) return `Files can be up to ${MAX_MEDIA_MB} MB. Try a shorter clip.`;
+export function photoProblem(file: { type: string; size: number }): string | undefined {
+  if (!PHOTO_TYPES.includes(file.type)) return "Use a JPG, PNG, WebP or GIF photo.";
+  if (file.size > MAX_PHOTO_MB * 1024 * 1024) return `Photos can be up to ${MAX_PHOTO_MB} MB.`;
   return undefined;
-}
-
-export function mediaKind(type: string): "image" | "video" {
-  return type.startsWith("video/") ? "video" : "image";
 }
 
 export type EventStatus = "cancelled" | "ended" | "live" | "full" | "open";

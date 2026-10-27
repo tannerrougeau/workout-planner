@@ -49,6 +49,7 @@ export function EventForm({ near, onCreated, onCancel }: { near?: LatLng; onCrea
         activity,
         description: description.trim(),
         starts_at: start.toISOString(),
+        time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
         duration_min: duration,
         place_name: place.trim(),
         lat: spot.lat,
@@ -134,7 +135,7 @@ export function EventForm({ near, onCreated, onCancel }: { near?: LatLng; onCrea
         {visibility === "public" && (
           <label className="check">
             <input id="ev-notify" type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
-            Notify people nearby who turned on event alerts
+            Alert people nearby who turned on event alerts
           </label>
         )}
       </div>
