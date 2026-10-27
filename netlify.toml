@@ -1,0 +1,8 @@
+# Netlify builds a test link for every pull request.
+# The live site is still GitHub Pages, deployed by .github/workflows/deploy.yml.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
