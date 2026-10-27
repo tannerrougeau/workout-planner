@@ -23,9 +23,9 @@ export function History({ sessions, units, onDelete, onClose }: Props) {
 
   return (
     <section className="history">
-      <div className="log-head">
-        <h2>Your progress</h2>
-        <button type="button" className="secondary" onClick={onClose}>Back to plan</button>
+      <div className="screen-head">
+        <button type="button" className="ghost" onClick={onClose}>← Plan</button>
+        <h1>Progress</h1>
       </div>
 
       {sessions.length === 0 ? (
@@ -56,7 +56,7 @@ export function History({ sessions, units, onDelete, onClose }: Props) {
                       <button type="button" className="link" onClick={() => setConfirming(undefined)}>Keep</button>
                     </span>
                   ) : (
-                    <button type="button" className="link quiet" onClick={() => setConfirming(s.id)}>Delete</button>
+                    <button type="button" className="link quiet" aria-label={`Delete workout from ${s.date}`} onClick={() => setConfirming(s.id)}>Delete</button>
                   )}
                 </div>
                 <ul>
@@ -77,9 +77,10 @@ export function History({ sessions, units, onDelete, onClose }: Props) {
   );
 }
 
-const W = 600;
-const H = 220;
-const PAD = { top: 16, right: 56, bottom: 28, left: 44 };
+// Sized close to a phone's width so axis text stays readable when the SVG scales down.
+const W = 400;
+const H = 200;
+const PAD = { top: 16, right: 48, bottom: 28, left: 40 };
 
 function niceTicks(min: number, max: number, count = 4): number[] {
   if (min === max) {
