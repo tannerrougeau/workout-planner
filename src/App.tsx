@@ -5,8 +5,8 @@ import { Onboarding } from "./Onboarding";
 import { EQUIPMENT, FOCUS_AREAS, GOALS, LEVELS, LIMITATIONS, labelOf } from "./options";
 import { WEEKDAYS, generatePlan, type WorkoutPlan } from "./planner";
 import { DEFAULT_PROFILE, clearProfile, loadProfile, saveProfile, type UserProfile } from "./profile";
-import { cyclePosition, nextTarget, suggestions, type Suggestion } from "./progress";
-import { fromLocalDate, loadSessions, saveSessions, sortByDate, type SessionLog } from "./workoutLog";
+import { cyclePosition, nextTarget, suggestions, weeklyProgress, type Suggestion, type WeeklyProgress } from "./progress";
+import { fromLocalDate, loadDraft, loadSessions, saveSessions, sortByDate, type SessionLog } from "./workoutLog";
 
 export function App() {
   const [profile, setProfile] = useState<UserProfile | null>(() => loadProfile());
@@ -94,6 +94,13 @@ function PlanView({
   const [screen, setScreen] = useState<Screen>({ kind: "plan" });
   const [selected, setSelected] = useState(() => defaultDay(plan, today));
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [draft, setDraft] = useState(() => loadDraft());
+  const draftDay = draft ? plan.days.findIndex((d) => d.weekday === draft.weekday && d.title === draft.dayTitle) : -1;
+  const week = weeklyProgress(sessions, plan.days.length, new Date());
+  const startWorkout = (i: number) => setScreen({ kind: "log", day: i });
+  const tab = (kind: "plan" | "history" | "profile") => (
+    <TabBar current={kind} logged={sessions.length} onSelect={(k) => setScreen({ kind: k })} />
+  );
 
   const dayIndex = Math.min(selected, plan.days.length - 1);
   const day = plan.days[dayIndex];
@@ -119,10 +126,15 @@ function PlanView({
           level={profile.level}
           units={profile.units}
           sessions={sessions}
+          draft={draftDay === screen.day ? draft : undefined}
           onUnitsChange={(units) => onChange({ ...profile, units })}
-          onCancel={() => setScreen({ kind: "plan" })}
+          onClose={() => {
+            setDraft(loadDraft());
+            setScreen({ kind: "plan" });
+          }}
           onSave={(session) => {
             onSessionsChange([...sessions, session]);
+            setDraft(undefined);
             setScreen({ kind: "plan" });
           }}
         />
@@ -137,8 +149,8 @@ function PlanView({
           sessions={sessions}
           units={profile.units}
           onDelete={(id) => onSessionsChange(sessions.filter((s) => s.id !== id))}
-          onClose={() => setScreen({ kind: "plan" })}
         />
+        {tab("history")}
       </div>
     );
   }
@@ -146,7 +158,8 @@ function PlanView({
   if (screen.kind === "profile") {
     return (
       <div className="app">
-        <ProfileScreen profile={profile} onChange={onChange} onEdit={onEdit} onReset={onReset} onClose={() => setScreen({ kind: "plan" })} />
+        <ProfileScreen profile={profile} onChange={onChange} onEdit={onEdit} onReset={onReset} />
+        {tab("profile")}
       </div>
     );
   }
@@ -154,39 +167,45 @@ function PlanView({
   return (
     <div className="app">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">{plan.splitName} · {labelOf(GOALS, profile.goal)}</p>
-          <h1>{name ? `Hi, ${name}` : "Your plan"}</h1>
-        </div>
-        <nav className="topnav">
-          <button type="button" className="secondary small" onClick={() => setScreen({ kind: "history" })}>
-            Progress{sessions.length > 0 && <span className="count">{sessions.length}</span>}
-          </button>
-          <button type="button" className="secondary small" onClick={() => setScreen({ kind: "profile" })}>Profile</button>
-        </nav>
+        <p className="eyebrow">{plan.splitName} · {labelOf(GOALS, profile.goal)}</p>
+        <h1>{name ? `Hi, ${name}` : "Your plan"}</h1>
       </header>
 
       <section className="hero" aria-label="Today">
-        <p className="eyebrow">
-          Today · {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
-        </p>
-        {todayIndex >= 0 ? (
-          <>
-            <h2>{plan.days[todayIndex].title}</h2>
-            <p className="hero-meta">
-              {plan.days[todayIndex].exercises.length} exercises · about {plan.days[todayIndex].estimatedMinutes} min
-              {loggedToday && " · Logged today"}
+        <div className="hero-top">
+          <div className="hero-text">
+            <p className="eyebrow">
+              Today · {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
             </p>
-            <button type="button" className="primary big" onClick={() => setScreen({ kind: "log", day: todayIndex })}>
-              {loggedToday ? "Log another session" : "Log today's workout"}
-            </button>
-          </>
-        ) : (
-          <>
-            <h2>Rest day</h2>
-            <p className="hero-meta">Recovery is part of the plan. Next up: {upNext.weekday} · {upNext.title}</p>
-          </>
-        )}
+            {draft && draftDay >= 0 ? (
+              <>
+                <h2>{plan.days[draftDay].title}</h2>
+                <p className="hero-meta">Workout in progress · started {new Date(draft.startedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</p>
+              </>
+            ) : todayIndex >= 0 ? (
+              <>
+                <h2>{plan.days[todayIndex].title}</h2>
+                <p className="hero-meta">
+                  {plan.days[todayIndex].exercises.length} exercises · about {plan.days[todayIndex].estimatedMinutes} min
+                  {loggedToday && " · Done today"}
+                </p>
+              </>
+            ) : (
+              <>
+                <h2>Rest day</h2>
+                <p className="hero-meta">Recovery is part of the plan. Next up: {upNext.weekday} · {upNext.title}</p>
+              </>
+            )}
+          </div>
+          <GoalRing week={week} />
+        </div>
+        {draft && draftDay >= 0 ? (
+          <button type="button" className="primary big" onClick={() => startWorkout(draftDay)}>Resume workout</button>
+        ) : todayIndex >= 0 ? (
+          <button type="button" className={loggedToday ? "secondary big" : "primary big"} onClick={() => startWorkout(todayIndex)}>
+            {loggedToday ? "Start another session" : "Start today's workout"}
+          </button>
+        ) : null}
         <div className="cycle">
           {cycle && cycleWeek ? (
             <>
@@ -253,7 +272,7 @@ function PlanView({
             </p>
           </div>
           {dayIndex !== todayIndex && (
-            <button type="button" className="secondary small" onClick={() => setScreen({ kind: "log", day: dayIndex })}>Log this workout</button>
+            <button type="button" className="secondary small" onClick={() => startWorkout(dayIndex)}>Start this workout</button>
           )}
         </div>
         <ol className="exercises">
@@ -314,6 +333,44 @@ function PlanView({
           <p><strong>Cool-down:</strong> {plan.coolDown}</p>
         </div>
       </details>
+      {tab("plan")}
+    </div>
+  );
+}
+
+const TABS = [
+  { kind: "plan", label: "Today", icon: "M4 11h3v2H4zm13 0h3v2h-3zM7 7h3v10H7zm7 0h3v10h-3zm-4 4h4v2h-4z" },
+  { kind: "history", label: "Progress", icon: "M4 19h16v2H4zm1-3 4-5 3 3 5-7 2 1.5-6.5 9-3-3L6.6 17.2z" },
+  { kind: "profile", label: "Profile", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z" },
+] as const;
+
+function TabBar({ current, logged, onSelect }: { current: string; logged: number; onSelect: (kind: (typeof TABS)[number]["kind"]) => void }) {
+  return (
+    <nav className="tabbar" aria-label="Sections">
+      {TABS.map((t) => (
+        <button key={t.kind} type="button" className={t.kind === current ? "tab on" : "tab"} aria-current={t.kind === current ? "page" : undefined} onClick={() => onSelect(t.kind)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={t.icon} /></svg>
+          <span>{t.label}</span>
+          {t.kind === "history" && logged > 0 && <span className="tab-badge">{logged}</span>}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/** This week's training days against the plan, as a ring, with the current streak. */
+function GoalRing({ week }: { week: WeeklyProgress }) {
+  const r = 26;
+  const c = 2 * Math.PI * r;
+  const share = Math.min(1, week.done / week.goal);
+  return (
+    <div className="goal" role="img" aria-label={`${week.done} of ${week.goal} workouts this week${week.streak > 1 ? `, ${week.streak}-week streak` : ""}`}>
+      <svg viewBox="0 0 64 64">
+        <circle className="goal-track" cx="32" cy="32" r={r} />
+        {share > 0 && <circle className="goal-fill" cx="32" cy="32" r={r} strokeDasharray={`${share * c} ${c}`} transform="rotate(-90 32 32)" />}
+        <text x="32" y="32" dy="0.35em" textAnchor="middle">{week.done}/{week.goal}</text>
+      </svg>
+      <span className="goal-label">{week.streak > 1 ? `${week.streak}-week streak` : "this week"}</span>
     </div>
   );
 }
@@ -323,13 +380,11 @@ function ProfileScreen({
   onChange,
   onEdit,
   onReset,
-  onClose,
 }: {
   profile: UserProfile;
   onChange: (profile: UserProfile) => void;
   onEdit: () => void;
   onReset: () => void;
-  onClose: () => void;
 }) {
   const excluded = profile.excluded ?? [];
   const [confirmReset, setConfirmReset] = useState(false);
@@ -344,10 +399,9 @@ function ProfileScreen({
 
   return (
     <section className="screen">
-      <div className="screen-head">
-        <button type="button" className="ghost" onClick={onClose}>← Plan</button>
+      <header className="topbar">
         <h1>Profile</h1>
-      </div>
+      </header>
 
       <div className="card">
         <dl className="summary">

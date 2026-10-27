@@ -1,6 +1,6 @@
 import { EXERCISES, type Level } from "./exercises";
 import type { PlannedExercise, ProgressionWeek } from "./planner";
-import { fromLocalDate, type ExerciseLog, type SessionLog, type Units } from "./workoutLog";
+import { fromLocalDate, toLocalDate, type ExerciseLog, type SessionLog, type Units } from "./workoutLog";
 
 const BY_NAME = new Map(EXERCISES.map((e) => [e.name, e]));
 const LOWER_COMPOUND = new Set(["squat", "hinge", "lunge"]);
@@ -194,4 +194,56 @@ export function exerciseSeries(name: string, sessions: SessionLog[], units: Unit
         detail: `${e.weight !== undefined ? `${formatWeight(e.weight, units)} × ` : ""}${e.values.join(", ")}`,
       })),
   };
+}
+
+/** Monday of the week containing the given date. */
+function weekStart(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7));
+}
+
+export interface WeeklyProgress {
+  /** Distinct days trained this week (Mon–Sun). */
+  done: number;
+  goal: number;
+  /** Consecutive weeks that met the goal, including this week once it's met. */
+  streak: number;
+}
+
+export function weeklyProgress(sessions: SessionLog[], goal: number, today: Date): WeeklyProgress {
+  const days = new Map<string, Set<string>>();
+  for (const s of sessions) {
+    const week = toLocalDate(weekStart(fromLocalDate(s.date)));
+    days.set(week, (days.get(week) ?? new Set()).add(s.date));
+  }
+  const count = (d: Date) => days.get(toLocalDate(d))?.size ?? 0;
+
+  let week = weekStart(today);
+  const done = count(week);
+  let streak = done >= goal ? 1 : 0;
+  for (;;) {
+    week = new Date(week.getFullYear(), week.getMonth(), week.getDate() - 7);
+    if (count(week) < goal) break;
+    streak++;
+  }
+  return { done, goal, streak };
+}
+
+/** Exercises in a session that beat every earlier log: a heavier weight, or a better best set without weight. */
+export function personalBests(session: Pick<SessionLog, "exercises">, earlier: SessionLog[]): string[] {
+  return session.exercises.flatMap((e) => {
+    if (e.values.length === 0) return [];
+    const prior = earlier.flatMap((s) => s.exercises.filter((x) => x.name === e.name && x.values.length > 0));
+    if (prior.length === 0) return [];
+    if (e.weight !== undefined) {
+      const best = Math.max(...prior.map((x) => x.weight ?? 0));
+      return e.weight > best ? [e.name] : [];
+    }
+    const best = Math.max(...prior.flatMap((x) => x.values));
+    return Math.max(...e.values) > best ? [e.name] : [];
+  });
+}
+
+/** Total weight moved: weight × reps, summed over weighted exercises. */
+export function sessionVolume(session: Pick<SessionLog, "exercises">): number {
+  return session.exercises.reduce((total, e) => total + (e.weight ?? 0) * sum(e.values), 0);
 }
