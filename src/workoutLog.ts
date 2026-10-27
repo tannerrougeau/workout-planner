@@ -37,9 +37,20 @@ export interface Draft {
 }
 
 export interface DraftEntry {
+  /** The exercise this entry belongs to, so a resumed workout matches entries by name. */
+  name: string;
   weight: string;
   sets: { value: string; done: boolean }[];
   trouble: boolean;
+}
+
+/**
+ * Lines up a saved workout's entries with today's exercises by name. An exercise that was
+ * swapped out, or whose set count changed, gets undefined (start it fresh). Entries saved
+ * before names were recorded can't be matched safely, so they're all dropped.
+ */
+export function matchDraftEntries(draft: Draft, exercises: { name: string; sets: number }[]): (DraftEntry | undefined)[] {
+  return exercises.map((ex) => draft.entries.find((e) => e.name === ex.name && e.sets.length === ex.sets));
 }
 
 const STORAGE_KEY = "workout-planner.log.v1";

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PlannedExercise } from "./planner";
 import { cyclePosition, exerciseSeries, nextTarget, personalBests, sessionVolume, suggestions, weeklyProgress } from "./progress";
-import type { ExerciseLog, Feeling, SessionLog } from "./workoutLog";
+import { matchDraftEntries, type ExerciseLog, type Feeling, type SessionLog } from "./workoutLog";
 
 const squat: PlannedExercise = { name: "Back Squat", pattern: "squat", sets: 3, reps: "8–12", restSeconds: 90, progression: "" };
 const curl: PlannedExercise = { name: "Dumbbell Curl", pattern: "biceps", sets: 2, reps: "10–15", restSeconds: 60, progression: "" };
@@ -150,5 +150,25 @@ describe("personalBests", () => {
 describe("sessionVolume", () => {
   it("sums weight × reps for weighted exercises only", () => {
     expect(sessionVolume({ exercises: [{ name: "Back Squat", weight: 60, values: [10, 8] }, { name: "Push-Up", values: [20] }] })).toBe(1080);
+  });
+});
+
+describe("matchDraftEntries", () => {
+  const entry = (name: string, sets: number) => ({ name, weight: "60", sets: Array.from({ length: sets }, () => ({ value: "8", done: true })), trouble: false });
+  const draft = { weekday: "Mon", dayTitle: "Upper Body", startedAt: 0, entries: [entry("Barbell Bench Press", 4), entry("Pull-Up", 4)] };
+
+  it("keeps entries by exercise name, even if the order changed", () => {
+    const matched = matchDraftEntries(draft, [{ name: "Pull-Up", sets: 4 }, { name: "Barbell Bench Press", sets: 4 }]);
+    expect(matched.map((e) => e?.name)).toEqual(["Pull-Up", "Barbell Bench Press"]);
+  });
+
+  it("starts swapped-in exercises and changed set counts fresh", () => {
+    const matched = matchDraftEntries(draft, [{ name: "Dumbbell Bench Press", sets: 4 }, { name: "Pull-Up", sets: 3 }]);
+    expect(matched).toEqual([undefined, undefined]);
+  });
+
+  it("drops entries saved before names were recorded", () => {
+    const old = { ...draft, entries: draft.entries.map(({ name: _name, ...rest }) => rest) } as unknown as typeof draft;
+    expect(matchDraftEntries(old, [{ name: "Pull-Up", sets: 4 }])).toEqual([undefined]);
   });
 });
