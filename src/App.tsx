@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { Suspense, lazy, useMemo, useState } from "react";
 import { History } from "./History";
+import { parseEventLink } from "./hub/format";
 import { LogWorkout } from "./LogWorkout";
 import { Onboarding } from "./Onboarding";
 import { VideoButton } from "./VideoButton";
@@ -53,7 +54,44 @@ export function App() {
   );
 }
 
-type Screen = { kind: "plan" } | { kind: "history" } | { kind: "profile" } | { kind: "log"; day: number };
+type Screen = { kind: "plan" } | { kind: "history" } | { kind: "profile" } | { kind: "hub" } | { kind: "log"; day: number };
+
+// The hub (maps, accounts, uploads) loads only when opened, keeping the workout tracker light.
+const Hub = lazy(() => import("./hub/Hub").then((m) => ({ default: m.Hub })));
+
+const PENDING_LINK_KEY = "workout-planner.hub.link";
+
+/**
+ * Event links (?event=…&code=…) are kept until the hub opens, so they survive onboarding
+ * and the email sign-in round trip, then removed from the address bar.
+ */
+function takeEventLink(): { eventId: string; code?: string } | undefined {
+  const fromUrl = parseEventLink(window.location.search);
+  try {
+    if (fromUrl) {
+      localStorage.setItem(PENDING_LINK_KEY, JSON.stringify(fromUrl));
+      const url = new URL(window.location.href);
+      url.searchParams.delete("event");
+      url.searchParams.delete("code");
+      history.replaceState(null, "", url);
+    }
+    const raw = localStorage.getItem(PENDING_LINK_KEY);
+    return raw ? (JSON.parse(raw) as { eventId: string; code?: string }) : undefined;
+  } catch {
+    return fromUrl;
+  }
+}
+
+function clearEventLink() {
+  try {
+    localStorage.removeItem(PENDING_LINK_KEY);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+// Read once at startup, before onboarding can unmount anything.
+const startupLink = takeEventLink();
 
 /** Today's weekday in the plan's Mon–Sun labels. */
 function todayLabel(): string {
@@ -92,14 +130,15 @@ function PlanView({
   const excluded = profile.excluded ?? [];
   const name = profile.name.trim();
   const today = todayLabel();
-  const [screen, setScreen] = useState<Screen>({ kind: "plan" });
+  const [screen, setScreen] = useState<Screen>(startupLink ? { kind: "hub" } : { kind: "plan" });
+  const [hubLink] = useState(startupLink);
   const [selected, setSelected] = useState(() => defaultDay(plan, today));
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [draft, setDraft] = useState(() => loadDraft());
   const draftDay = draft ? plan.days.findIndex((d) => d.weekday === draft.weekday && d.title === draft.dayTitle) : -1;
   const week = weeklyProgress(sessions, plan.days.length, new Date());
   const startWorkout = (i: number) => setScreen({ kind: "log", day: i });
-  const tab = (kind: "plan" | "history" | "profile") => (
+  const tab = (kind: "plan" | "history" | "hub" | "profile") => (
     <TabBar current={kind} logged={sessions.length} onSelect={(k) => setScreen({ kind: k })} />
   );
 
@@ -152,6 +191,15 @@ function PlanView({
           onDelete={(id) => onSessionsChange(sessions.filter((s) => s.id !== id))}
         />
         {tab("history")}
+      </div>
+    );
+  }
+
+  if (screen.kind === "hub") {
+    return (
+      <div className="app">
+        <HubScreen link={hubLink} />
+        {tab("hub")}
       </div>
     );
   }
@@ -345,6 +393,7 @@ function PlanView({
 const TABS = [
   { kind: "plan", label: "Today", icon: "M4 11h3v2H4zm13 0h3v2h-3zM7 7h3v10H7zm7 0h3v10h-3zm-4 4h4v2h-4z" },
   { kind: "history", label: "Progress", icon: "M4 19h16v2H4zm1-3 4-5 3 3 5-7 2 1.5-6.5 9-3-3L6.6 17.2z" },
+  { kind: "hub", label: "Hub", icon: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8 13c-3 0-6 1.5-6 4v2h12v-2c0-2.5-3-4-6-4zm8 0c-.6 0-1.2.1-1.8.2 1.1.9 1.8 2.1 1.8 3.8v2h6v-2c0-2.5-3-4-6-4z" },
   { kind: "profile", label: "Profile", icon: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z" },
 ] as const;
 
@@ -359,6 +408,15 @@ function TabBar({ current, logged, onSelect }: { current: string; logged: number
         </button>
       ))}
     </nav>
+  );
+}
+
+/** The hub; a pending event link is cleared once a signed-in hub has opened it. */
+function HubScreen({ link }: { link?: { eventId: string; code?: string } }) {
+  return (
+    <Suspense fallback={<p className="empty">Loading the hub…</p>}>
+      <Hub initialLink={link} onLinkUsed={clearEventLink} />
+    </Suspense>
   );
 }
 

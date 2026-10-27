@@ -12,7 +12,8 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       // Cache the bundled fonts too, so the app looks the same offline.
-      workbox: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"] },
+      // push-sw.js adds nearby-event notifications to the generated service worker.
+      workbox: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"], importScripts: ["push-sw.js"] },
       includeAssets: ["favicon.ico", "apple-touch-icon-180x180.png"],
       manifest: {
         name: "Workout Planner",
