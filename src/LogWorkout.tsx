@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Level } from "./exercises";
 import type { WorkoutDay } from "./planner";
+import { VideoButton } from "./VideoButton";
 import { formatWeight, measureOf, nextTarget, personalBests, recentLogs, sessionVolume, setsToLog, takesWeight } from "./progress";
 import {
   clearDraft,
@@ -251,7 +252,10 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
         return (
           <article key={ex.name} className="log-exercise">
             <header className="log-exercise-head">
-              <h2>{ex.name}</h2>
+              <div className="log-exercise-title">
+                <h2>{ex.name}</h2>
+                <VideoButton exercise={ex.name} />
+              </div>
               <p className="target">
                 {target ? <>Target <strong>{target.text}</strong>{target.why === "backOff" && " · backing off to break a plateau"}</> : <>Plan {ex.sets} × {ex.reps}</>}
               </p>

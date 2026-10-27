@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { History } from "./History";
 import { LogWorkout } from "./LogWorkout";
 import { Onboarding } from "./Onboarding";
+import { VideoButton } from "./VideoButton";
 import { EQUIPMENT, FOCUS_AREAS, GOALS, LEVELS, LIMITATIONS, labelOf } from "./options";
 import { WEEKDAYS, generatePlan, type WorkoutPlan } from "./planner";
 import { DEFAULT_PROFILE, clearProfile, loadProfile, saveProfile, type UserProfile } from "./profile";
@@ -289,15 +290,18 @@ function PlanView({
                   {target && <p className="target-chip">Next: <strong>{target.text}</strong></p>}
                   <p className="hint">{ex.progression}</p>
                 </div>
-                <button
-                  type="button"
-                  className="swap"
-                  title="Swap for a different exercise"
-                  aria-label={`Swap out ${ex.name}`}
-                  onClick={() => onChange({ ...profile, excluded: [...excluded, ex.name] })}
-                >
-                  ⇄
-                </button>
+                <div className="exercise-actions">
+                  <VideoButton exercise={ex.name} />
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title="Swap for a different exercise"
+                    aria-label={`Swap out ${ex.name}`}
+                    onClick={() => onChange({ ...profile, excluded: [...excluded, ex.name] })}
+                  >
+                    ⇄
+                  </button>
+                </div>
               </li>
             );
           })}
