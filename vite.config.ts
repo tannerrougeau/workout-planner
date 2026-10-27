@@ -11,6 +11,8 @@ export default defineConfig({
     // Makes the site installable and usable offline; installed copies update themselves after each deploy.
     VitePWA({
       registerType: "autoUpdate",
+      // Cache the bundled fonts too, so the app looks the same offline.
+      workbox: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"] },
       includeAssets: ["favicon.ico", "apple-touch-icon-180x180.png"],
       manifest: {
         name: "Workout Planner",

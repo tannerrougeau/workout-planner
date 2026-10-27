@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { WorkoutDay } from "./planner";
 import { measureOf, nextTarget, recentLogs, setsToLog, takesWeight } from "./progress";
 import { newId, toLocalDate, type ExerciseLog, type Feeling, type SessionLog, type Units } from "./workoutLog";
@@ -112,7 +112,7 @@ export function LogWorkout({ day, level, units, sessions, onUnitsChange, onSave,
                   />
                 </label>
               )}
-              <div className="sets">
+              <div className="sets" style={{ "--sets": entry.values.length } as CSSProperties}>
                 <span className="sets-label">{MEASURE_LABEL[measure]}</span>
                 {entry.values.map((v, s) => (
                   <input
@@ -122,7 +122,7 @@ export function LogWorkout({ day, level, units, sessions, onUnitsChange, onSave,
                     inputMode="numeric"
                     min="0"
                     aria-label={`${ex.name} set ${s + 1} ${MEASURE_LABEL[measure].toLowerCase()}`}
-                    placeholder={target ? String(target.value) : ""}
+                    placeholder={String(target?.value ?? (ex.reps.match(/\d+/)?.[0] ?? ""))}
                     value={v}
                     onChange={(e) => updateEntry(i, { values: entry.values.map((x, k) => (k === s ? e.target.value : x)) })}
                   />

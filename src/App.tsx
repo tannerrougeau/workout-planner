@@ -3,7 +3,7 @@ import { History } from "./History";
 import { LogWorkout } from "./LogWorkout";
 import { Onboarding } from "./Onboarding";
 import { EQUIPMENT, FOCUS_AREAS, GOALS, LEVELS, LIMITATIONS, labelOf } from "./options";
-import { generatePlan } from "./planner";
+import { WEEKDAYS, generatePlan, type WorkoutPlan } from "./planner";
 import { DEFAULT_PROFILE, clearProfile, loadProfile, saveProfile, type UserProfile } from "./profile";
 import { cyclePosition, nextTarget, suggestions, type Suggestion } from "./progress";
 import { fromLocalDate, loadSessions, saveSessions, sortByDate, type SessionLog } from "./workoutLog";
@@ -52,7 +52,25 @@ export function App() {
   );
 }
 
-type Screen = { kind: "plan" } | { kind: "history" } | { kind: "log"; day: number };
+type Screen = { kind: "plan" } | { kind: "history" } | { kind: "profile" } | { kind: "log"; day: number };
+
+/** Today's weekday in the plan's Mon–Sun labels. */
+function todayLabel(): string {
+  return WEEKDAYS[(new Date().getDay() + 6) % 7];
+}
+
+/** Today's training day, or the next one coming up this week (wrapping to next week). */
+function defaultDay(plan: WorkoutPlan, today: string): number {
+  const start = WEEKDAYS.indexOf(today as (typeof WEEKDAYS)[number]);
+  for (let offset = 0; offset < 7; offset++) {
+    const label = WEEKDAYS[(start + offset) % 7];
+    const i = plan.days.findIndex((d) => d.weekday === label);
+    if (i >= 0) return i;
+  }
+  return 0;
+}
+
+const shortDate = (date: string) => fromLocalDate(date).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 function PlanView({
   profile,
@@ -72,13 +90,20 @@ function PlanView({
   const plan = useMemo(() => generatePlan(profile), [profile]);
   const excluded = profile.excluded ?? [];
   const name = profile.name.trim();
+  const today = todayLabel();
   const [screen, setScreen] = useState<Screen>({ kind: "plan" });
+  const [selected, setSelected] = useState(() => defaultDay(plan, today));
   const [dismissed, setDismissed] = useState<string[]>([]);
 
+  const dayIndex = Math.min(selected, plan.days.length - 1);
+  const day = plan.days[dayIndex];
+  const todayIndex = plan.days.findIndex((d) => d.weekday === today);
+  const upNext = plan.days[defaultDay(plan, today)];
   const cycle = cyclePosition(plan.progression.weeks, sessions, new Date());
+  const cycleWeek = cycle && plan.progression.weeks[cycle.index];
   const tips = suggestions(sessions, profile.level, excluded).filter((s) => !dismissed.includes(s.text));
-  const lastLogged = (title: string, weekday: string) =>
-    [...sessions].reverse().find((s) => s.dayTitle === title && s.weekday === weekday)?.date;
+  const lastLogged = [...sessions].reverse().find((s) => s.dayTitle === day.title && s.weekday === day.weekday)?.date;
+  const loggedToday = todayIndex >= 0 && sessions.some((s) => s.weekday === today && fromLocalDate(s.date).toDateString() === new Date().toDateString());
 
   const act = (s: Suggestion) => {
     if (s.kind === "levelUp") onChange({ ...profile, level: s.level });
@@ -118,170 +143,274 @@ function PlanView({
     );
   }
 
+  if (screen.kind === "profile") {
+    return (
+      <div className="app">
+        <ProfileScreen profile={profile} onChange={onChange} onEdit={onEdit} onReset={onReset} onClose={() => setScreen({ kind: "plan" })} />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
-      <header className="plan-header">
+      <header className="topbar">
         <div>
-          <h1>{name ? `${name}'s plan` : "Your plan"}</h1>
-          <p>{plan.splitName} · {plan.days.length} days/week · {labelOf(GOALS, profile.goal)}</p>
+          <p className="eyebrow">{plan.splitName} · {labelOf(GOALS, profile.goal)}</p>
+          <h1>{name ? `Hi, ${name}` : "Your plan"}</h1>
         </div>
-        <button type="button" className="secondary" onClick={() => setScreen({ kind: "history" })}>
-          Progress{sessions.length > 0 && ` (${sessions.length})`}
-        </button>
+        <nav className="topnav">
+          <button type="button" className="secondary small" onClick={() => setScreen({ kind: "history" })}>
+            Progress{sessions.length > 0 && <span className="count">{sessions.length}</span>}
+          </button>
+          <button type="button" className="secondary small" onClick={() => setScreen({ kind: "profile" })}>Profile</button>
+        </nav>
       </header>
 
-      <div className="banner">
-        {cycle ? (
-          <p>
-            <strong>Week {cycle.week} of {cycle.cycleLength}</strong> · {plan.progression.weeks[cycle.index].effort}: {plan.progression.weeks[cycle.index].detail}
-            {cycle.lightNext && " Next week is a lighter recovery week."}
-          </p>
+      <section className="hero" aria-label="Today">
+        <p className="eyebrow">
+          Today · {new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+        </p>
+        {todayIndex >= 0 ? (
+          <>
+            <h2>{plan.days[todayIndex].title}</h2>
+            <p className="hero-meta">
+              {plan.days[todayIndex].exercises.length} exercises · about {plan.days[todayIndex].estimatedMinutes} min
+              {loggedToday && " · Logged today"}
+            </p>
+            <button type="button" className="primary big" onClick={() => setScreen({ kind: "log", day: todayIndex })}>
+              {loggedToday ? "Log another session" : "Log today's workout"}
+            </button>
+          </>
         ) : (
-          <p>Log your first workout to start tracking your progress. The app then sets a target for each exercise.</p>
+          <>
+            <h2>Rest day</h2>
+            <p className="hero-meta">Recovery is part of the plan. Next up: {upNext.weekday} · {upNext.title}</p>
+          </>
         )}
-        {tips.map((s) => (
-          <div key={s.text} className="suggestion">
-            <span>{s.text}</span>
-            {(s.kind === "levelUp" || s.kind === "swap") && (
-              <button type="button" className="link" onClick={() => act(s)}>{s.kind === "levelUp" ? `Move up to ${s.level}` : "Swap it"}</button>
-            )}
-            <button type="button" className="link quiet" onClick={() => setDismissed([...dismissed, s.text])}>Dismiss</button>
+        <div className="cycle">
+          {cycle && cycleWeek ? (
+            <>
+              <span className={`effort ${cycleWeek.effort.toLowerCase()}`}>Week {cycle.week} of {cycle.cycleLength} · {cycleWeek.effort}</span>
+              <span>{cycleWeek.detail}{cycle.lightNext && " Next week is a lighter week."}</span>
+            </>
+          ) : (
+            <span>Log your first workout and the app starts setting a target for each exercise.</span>
+          )}
+        </div>
+      </section>
+
+      {tips.length > 0 && (
+        <ul className="tips">
+          {tips.map((s) => (
+            <li key={s.text} className="tip">
+              <p>{s.text}</p>
+              <div className="tip-actions">
+                {(s.kind === "levelUp" || s.kind === "swap") && (
+                  <button type="button" className="primary small" onClick={() => act(s)}>
+                    {s.kind === "levelUp" ? `Move up to ${s.level}` : "Swap it"}
+                  </button>
+                )}
+                <button type="button" className="ghost small" onClick={() => setDismissed([...dismissed, s.text])}>Dismiss</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <nav className="week" aria-label="Choose a day">
+        {WEEKDAYS.map((label) => {
+          const i = plan.days.findIndex((d) => d.weekday === label);
+          const isToday = label === today;
+          if (i < 0) {
+            return (
+              <span key={label} className={isToday ? "week-day rest today" : "week-day rest"}>
+                <span className="week-label">{label}</span>
+                <span className="week-sub">Rest</span>
+              </span>
+            );
+          }
+          return (
+            <button
+              key={label}
+              type="button"
+              aria-pressed={i === dayIndex}
+              className={["week-day", i === dayIndex && "on", isToday && "today"].filter(Boolean).join(" ")}
+              onClick={() => setSelected(i)}
+            >
+              <span className="week-label">{label}</span>
+              <span className="week-sub">{plan.days[i].title.replace("Full Body", "Full").replace(" Body", "")}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <section className="day" aria-label={`${day.weekday} workout`}>
+        <div className="day-head">
+          <div>
+            <h2>{day.weekday} · {day.title}</h2>
+            <p className="muted">
+              About {day.estimatedMinutes} min{lastLogged && ` · Last logged ${shortDate(lastLogged)}`}
+            </p>
           </div>
-        ))}
+          {dayIndex !== todayIndex && (
+            <button type="button" className="secondary small" onClick={() => setScreen({ kind: "log", day: dayIndex })}>Log this workout</button>
+          )}
+        </div>
+        <ol className="exercises">
+          {day.exercises.map((ex) => {
+            const target = nextTarget(ex, sessions, profile.units);
+            return (
+              <li key={ex.name} className="exercise">
+                <div className="exercise-main">
+                  <h3>{ex.name}</h3>
+                  <p className="prescription">
+                    <span className="num">{ex.sets}</span> sets × <span className="num">{ex.reps}</span>
+                    <span className="sep">·</span>rest {ex.restSeconds}s
+                  </p>
+                  {target && <p className="target-chip">Next: <strong>{target.text}</strong></p>}
+                  <p className="hint">{ex.progression}</p>
+                </div>
+                <button
+                  type="button"
+                  className="swap"
+                  title="Swap for a different exercise"
+                  aria-label={`Swap out ${ex.name}`}
+                  onClick={() => onChange({ ...profile, excluded: [...excluded, ex.name] })}
+                >
+                  ⇄
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
+      <details className="guide">
+        <summary>How to progress</summary>
+        <div className="guide-body">
+          <p>{plan.progression.summary}</p>
+          <ol className="weeks">
+            {plan.progression.weeks.map((w, i) => (
+              <li key={w.week} className={cycle?.index === i ? "current" : undefined}>
+                <span className="weeks-when">{w.week}</span>
+                <span className={`effort ${w.effort.toLowerCase()}`}>{w.effort}</span>
+                <span className="weeks-what">{w.detail}</span>
+              </li>
+            ))}
+          </ol>
+          <p><strong>For your goal:</strong> {plan.progression.goalTip}</p>
+          <h3>When to back off</h3>
+          <ul>
+            {plan.progression.backOff.map((tip) => <li key={tip}>{tip}</li>)}
+          </ul>
+          {plan.progression.levelUp && <p><strong>Moving up:</strong> {plan.progression.levelUp}</p>}
+        </div>
+      </details>
+
+      <details className="guide">
+        <summary>Warm-up and cool-down</summary>
+        <div className="guide-body">
+          <p><strong>Warm-up:</strong> {plan.warmUp}</p>
+          <p><strong>Cool-down:</strong> {plan.coolDown}</p>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function ProfileScreen({
+  profile,
+  onChange,
+  onEdit,
+  onReset,
+  onClose,
+}: {
+  profile: UserProfile;
+  onChange: (profile: UserProfile) => void;
+  onEdit: () => void;
+  onReset: () => void;
+  onClose: () => void;
+}) {
+  const excluded = profile.excluded ?? [];
+  const [confirmReset, setConfirmReset] = useState(false);
+  const rows: [string, string][] = [
+    ["Goal", labelOf(GOALS, profile.goal)],
+    ["Level", labelOf(LEVELS, profile.level)],
+    ["Schedule", `${WEEKDAYS.filter((d) => (profile.weekdays ?? []).includes(d)).join(", ")} · ${profile.sessionMinutes} min`],
+    ["Equipment", profile.equipment.map((e) => labelOf(EQUIPMENT, e)).join(", ") || "Bodyweight only"],
+    ["Working around", (profile.limitations ?? []).map((l) => labelOf(LIMITATIONS, l)).join(", ") || "Nothing"],
+    ["Extra focus", (profile.focus ?? []).map((f) => labelOf(FOCUS_AREAS, f)).join(", ") || "None"],
+  ];
+
+  return (
+    <section className="screen">
+      <div className="screen-head">
+        <button type="button" className="ghost" onClick={onClose}>← Plan</button>
+        <h1>Profile</h1>
       </div>
 
-      <main>
-        <aside className="panel">
-          <h2>Your profile</h2>
-          <dl className="summary">
-            <dt>Goal</dt><dd>{labelOf(GOALS, profile.goal)}</dd>
-            <dt>Level</dt><dd>{labelOf(LEVELS, profile.level)}</dd>
-            <dt>Sessions</dt><dd>{profile.sessionMinutes} min</dd>
-            <dt>Equipment</dt>
-            <dd>{profile.equipment.map((e) => labelOf(EQUIPMENT, e)).join(", ") || "Bodyweight only"}</dd>
-            {(profile.limitations ?? []).length > 0 && (
-              <>
-                <dt>Working around</dt>
-                <dd>{profile.limitations!.map((l) => labelOf(LIMITATIONS, l)).join(", ")}</dd>
-              </>
-            )}
-            {(profile.focus ?? []).length > 0 && (
-              <>
-                <dt>Extra focus</dt>
-                <dd>{profile.focus!.map((f) => labelOf(FOCUS_AREAS, f)).join(", ")}</dd>
-              </>
-            )}
-          </dl>
-          <button type="button" className="primary" onClick={onEdit}>Edit answers</button>
-
-          {excluded.length > 0 && (
-            <div className="excluded">
-              <h3>Removed exercises</h3>
-              <ul>
-                {excluded.map((n) => (
-                  <li key={n}>
-                    {n}
-                    <button
-                      type="button"
-                      className="link"
-                      onClick={() => onChange({ ...profile, excluded: excluded.filter((x) => x !== n) })}
-                    >
-                      Restore
-                    </button>
-                  </li>
-                ))}
-              </ul>
+      <div className="card">
+        <dl className="summary">
+          {rows.map(([k, v]) => (
+            <div key={k} className="summary-row">
+              <dt>{k}</dt>
+              <dd>{v}</dd>
             </div>
-          )}
+          ))}
+        </dl>
+        <button type="button" className="primary" onClick={onEdit}>Edit answers</button>
+      </div>
 
-          <button type="button" className="link danger" onClick={onReset}>Start over</button>
-        </aside>
+      <div className="card">
+        <h2>Weight units</h2>
+        <div className="segmented" role="radiogroup" aria-label="Weight units">
+          {(["kg", "lb"] as const).map((u) => (
+            <button
+              key={u}
+              type="button"
+              role="radio"
+              aria-checked={profile.units === u}
+              className={profile.units === u ? "chip on" : "chip"}
+              onClick={() => onChange({ ...profile, units: u })}
+            >
+              {u}
+            </button>
+          ))}
+        </div>
+        <p className="muted">Changing units doesn't convert weights you've already logged.</p>
+      </div>
 
-        <section className="plan">
-          <div className="days">
-            {plan.days.map((day, i) => (
-              <article key={i} className="day">
-                <h3>
-                  <span className="weekday">{day.weekday}</span> {day.title}
-                  <span className="duration">~{day.estimatedMinutes} min</span>
-                </h3>
-                <div className="day-actions">
-                  <button type="button" className="primary small" onClick={() => setScreen({ kind: "log", day: i })}>Log workout</button>
-                  {(() => {
-                    const last = lastLogged(day.title, day.weekday);
-                    return last && <span className="last-logged">Last logged {fromLocalDate(last).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>;
-                  })()}
-                </div>
-                <table>
-                  <thead>
-                    <tr><th>Exercise</th><th>Sets</th><th>Reps</th><th>Rest</th><th /></tr>
-                  </thead>
-                  <tbody>
-                    {day.exercises.map((ex) => {
-                      const target = nextTarget(ex, sessions, profile.units);
-                      return (
-                      <tr key={ex.name}>
-                        <td>
-                          {ex.name}
-                          {target && <div className="next">Next: {target.text}</div>}
-                          <div className="hint">{ex.progression}</div>
-                        </td>
-                        <td>{ex.sets}</td>
-                        <td>{ex.reps}</td>
-                        <td>{ex.restSeconds}s</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="swap"
-                            title="Don't like this one? Swap it out"
-                            aria-label={`Swap out ${ex.name}`}
-                            onClick={() => onChange({ ...profile, excluded: [...excluded, ex.name] })}
-                          >
-                            ⇄
-                          </button>
-                        </td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </article>
+      <div className="card">
+        <h2>Removed exercises</h2>
+        {excluded.length === 0 ? (
+          <p className="muted">None. Tap ⇄ next to an exercise in your plan to swap it out.</p>
+        ) : (
+          <ul className="removed">
+            {excluded.map((n) => (
+              <li key={n}>
+                <span>{n}</span>
+                <button type="button" className="ghost small" onClick={() => onChange({ ...profile, excluded: excluded.filter((x) => x !== n) })}>
+                  Restore
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
+        )}
+      </div>
 
-          <div className="notes">
-            <p><strong>Warm-up:</strong> {plan.warmUp}</p>
-            <p><strong>Cool-down:</strong> {plan.coolDown}</p>
+      <div className="card">
+        {confirmReset ? (
+          <div className="confirm">
+            <p>Start over with new onboarding answers? Your workout history is kept.</p>
+            <div className="tip-actions">
+              <button type="button" className="danger small" onClick={onReset}>Start over</button>
+              <button type="button" className="ghost small" onClick={() => setConfirmReset(false)}>Cancel</button>
+            </div>
           </div>
-
-          <div className="notes progression">
-            <h2>How to progress</h2>
-            <p>{plan.progression.summary}</p>
-            <table>
-              <thead>
-                <tr><th>When</th><th>Effort</th><th>What to do</th></tr>
-              </thead>
-              <tbody>
-                {plan.progression.weeks.map((w, i) => (
-                  <tr key={w.week} className={cycle?.index === i ? "current" : undefined}>
-                    <td>{w.week}</td>
-                    <td>{w.effort}</td>
-                    <td>{w.detail}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p><strong>For your goal:</strong> {plan.progression.goalTip}</p>
-            <h3>When to back off</h3>
-            <ul>
-              {plan.progression.backOff.map((tip) => <li key={tip}>{tip}</li>)}
-            </ul>
-            {plan.progression.levelUp && (
-              <p><strong>Moving up:</strong> {plan.progression.levelUp}</p>
-            )}
-          </div>
-        </section>
-      </main>
-    </div>
+        ) : (
+          <button type="button" className="ghost danger-text" onClick={() => setConfirmReset(true)}>Start over…</button>
+        )}
+      </div>
+    </section>
   );
 }
