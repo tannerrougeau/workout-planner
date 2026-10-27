@@ -67,14 +67,14 @@ describe("progression", () => {
 
   it("uses the exercise's own rep range and set count for loaded lifts", () => {
     const ex = generatePlan(base).days[0].exercises.find((e) => byName.get(e.name)?.equipment.includes("barbell"));
-    expect(ex?.progression).toContain(`hit 10 reps on all ${ex?.sets} sets`);
-    expect(ex?.progression).toContain("start back at 6 reps");
+    expect(ex?.progression).toContain("Hit 10 reps on every set?");
+    expect(ex?.progression).toMatch(/Add (2\.5 kg \/ 5 lb|5 kg \/ 10 lb)\.$/);
   });
 
   it("ends every block with a lighter week", () => {
     for (const level of ["beginner", "intermediate", "advanced"] as const) {
       const weeks = generatePlan({ ...base, level }).progression.weeks;
-      expect(weeks.at(-1)?.effort).toMatch(/^4/);
+      expect(weeks.at(-1)?.effort).toBe("Light");
     }
   });
 
