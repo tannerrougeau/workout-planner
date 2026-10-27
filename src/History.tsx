@@ -1,5 +1,5 @@
 import { useMemo, useState, type PointerEvent } from "react";
-import { exerciseSeries, formatWeight, type SeriesPoint } from "./progress";
+import { exerciseSeries, formatWeight, personalBests, type SeriesPoint } from "./progress";
 import { fromLocalDate, type SessionLog, type Units } from "./workoutLog";
 
 const FEELING_LABEL = { easy: "Too easy", right: "Just right", hard: "Too hard" } as const;
@@ -8,10 +8,9 @@ interface Props {
   sessions: SessionLog[];
   units: Units;
   onDelete: (id: string) => void;
-  onClose: () => void;
 }
 
-export function History({ sessions, units, onDelete, onClose }: Props) {
+export function History({ sessions, units, onDelete }: Props) {
   const names = useMemo(() => {
     const counts = new Map<string, number>();
     for (const s of sessions) for (const e of s.exercises) if (e.values.length > 0) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);
@@ -23,13 +22,12 @@ export function History({ sessions, units, onDelete, onClose }: Props) {
 
   return (
     <section className="history">
-      <div className="screen-head">
-        <button type="button" className="ghost" onClick={onClose}>← Plan</button>
+      <header className="topbar">
         <h1>Progress</h1>
-      </div>
+      </header>
 
       {sessions.length === 0 ? (
-        <p className="empty">No workouts logged yet. Use “Log workout” on any day of your plan, and your progress will show up here.</p>
+        <p className="empty">No workouts yet. Start a workout from the Today tab, and your progress will show up here.</p>
       ) : (
         <>
           <div className="chart-card">
@@ -43,11 +41,11 @@ export function History({ sessions, units, onDelete, onClose }: Props) {
           </div>
 
           <ol className="sessions">
-            {[...sessions].reverse().map((s) => (
+            {sessions.map((s, i) => ({ s, bests: personalBests(s, sessions.slice(0, i)) })).reverse().map(({ s, bests }) => (
               <li key={s.id} className="session">
                 <div className="session-head">
                   <strong>{fromLocalDate(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</strong>
-                  <span>{s.dayTitle}</span>
+                  <span>{s.dayTitle}{s.durationMin !== undefined && ` · ${s.durationMin} min`}</span>
                   {s.feeling && <span className={`pill ${s.feeling}`}>{FEELING_LABEL[s.feeling]}</span>}
                   {confirming === s.id ? (
                     <span className="confirm">
@@ -63,6 +61,7 @@ export function History({ sessions, units, onDelete, onClose }: Props) {
                   {s.exercises.map((e) => (
                     <li key={e.name}>
                       {e.name}: {e.values.length > 0 ? `${e.weight !== undefined ? `${formatWeight(e.weight, units)} × ` : ""}${e.values.join(", ")}` : "not logged"}
+                      {bests.includes(e.name) && <span className="pill best">New best</span>}
                       {e.trouble && <span className="pill trouble">Trouble</span>}
                     </li>
                   ))}

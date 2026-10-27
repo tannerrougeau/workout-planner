@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlannedExercise } from "./planner";
-import { cyclePosition, exerciseSeries, nextTarget, suggestions } from "./progress";
+import { cyclePosition, exerciseSeries, nextTarget, personalBests, sessionVolume, suggestions, weeklyProgress } from "./progress";
 import type { ExerciseLog, Feeling, SessionLog } from "./workoutLog";
 
 const squat: PlannedExercise = { name: "Back Squat", pattern: "squat", sets: 3, reps: "8–12", restSeconds: 90, progression: "" };
@@ -109,5 +109,46 @@ describe("exerciseSeries", () => {
     ];
     expect(exerciseSeries("Back Squat", sessions, "kg")).toMatchObject({ measure: "Weight (kg)", points: [{ value: 60 }, { value: 62.5 }] });
     expect(exerciseSeries("Push-Up", sessions, "kg")).toMatchObject({ measure: "Best set", points: [{ value: 10 }] });
+  });
+});
+
+describe("weeklyProgress", () => {
+  // Tue 2026-10-27; its week starts Mon 2026-10-26.
+  const today = new Date(2026, 9, 27);
+
+  it("counts distinct training days this week", () => {
+    const sessions = [session("2026-10-26", []), session("2026-10-26", []), session("2026-10-27", []), session("2026-10-25", [])];
+    expect(weeklyProgress(sessions, 3, today)).toMatchObject({ done: 2, goal: 3 });
+  });
+
+  it("counts a streak of past weeks that met the goal, plus this week once met", () => {
+    const met = (dates: string[]) => dates.map((d) => session(d, []));
+    const past = met(["2026-10-12", "2026-10-14", "2026-10-19", "2026-10-21"]);
+    expect(weeklyProgress(past, 2, today).streak).toBe(2);
+    expect(weeklyProgress([...past, ...met(["2026-10-26", "2026-10-27"])], 2, today).streak).toBe(3);
+    expect(weeklyProgress(met(["2026-10-05", "2026-10-07"]), 2, today).streak).toBe(0);
+  });
+});
+
+describe("personalBests", () => {
+  const earlier = [session("2026-10-01", [{ name: "Back Squat", weight: 60, values: [10] }, { name: "Push-Up", values: [12, 10] }])];
+
+  it("flags a heavier weight or a better unweighted set, but not first-time exercises", () => {
+    const today = { exercises: [
+      { name: "Back Squat", weight: 65, values: [8] },
+      { name: "Push-Up", values: [13] },
+      { name: "Plank", values: [60] },
+    ] };
+    expect(personalBests(today, earlier)).toEqual(["Back Squat", "Push-Up"]);
+  });
+
+  it("does not flag matching the previous best", () => {
+    expect(personalBests({ exercises: [{ name: "Back Squat", weight: 60, values: [12] }] }, earlier)).toEqual([]);
+  });
+});
+
+describe("sessionVolume", () => {
+  it("sums weight × reps for weighted exercises only", () => {
+    expect(sessionVolume({ exercises: [{ name: "Back Squat", weight: 60, values: [10, 8] }, { name: "Push-Up", values: [20] }] })).toBe(1080);
   });
 });

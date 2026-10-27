@@ -24,9 +24,52 @@ export interface SessionLog {
   feeling?: Feeling;
   notes: string;
   exercises: ExerciseLog[];
+  /** Minutes from starting to finishing the workout in the app. */
+  durationMin?: number;
+}
+
+/** A workout in progress, saved on every change so leaving the app doesn't lose it. */
+export interface Draft {
+  weekday: string;
+  dayTitle: string;
+  startedAt: number;
+  entries: DraftEntry[];
+}
+
+export interface DraftEntry {
+  weight: string;
+  sets: { value: string; done: boolean }[];
+  trouble: boolean;
 }
 
 const STORAGE_KEY = "workout-planner.log.v1";
+const DRAFT_KEY = "workout-planner.draft.v1";
+
+export function loadDraft(): Draft | undefined {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : undefined;
+    return parsed && typeof parsed === "object" && "entries" in parsed ? (parsed as Draft) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveDraft(draft: Draft): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // The draft just won't survive leaving the app.
+  }
+}
+
+export function clearDraft(): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
 
 export function loadSessions(): SessionLog[] {
   try {
