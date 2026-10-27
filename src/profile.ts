@@ -1,7 +1,10 @@
+import { EMPTY_ASSESSMENT, type AssessmentAnswers } from "./assessment";
 import type { PlanInput } from "./planner";
 
 export interface UserProfile extends PlanInput {
   name: string;
+  /** Onboarding answers the experience level was assigned from. */
+  assessment: AssessmentAnswers;
 }
 
 const STORAGE_KEY = "workout-planner.profile.v1";
@@ -17,6 +20,7 @@ export const DEFAULT_PROFILE: UserProfile = {
   limitations: [],
   focus: [],
   excluded: [],
+  assessment: EMPTY_ASSESSMENT,
 };
 
 export function loadProfile(): UserProfile | null {

@@ -1,4 +1,13 @@
 import { useState, type ReactNode } from "react";
+import {
+  LIFTS,
+  PROGRESS_RATES,
+  PUSH_UPS,
+  TRAINING_TIME,
+  assessLevel,
+  isAssessmentComplete,
+  type AssessmentAnswers,
+} from "./assessment";
 import { WEEKDAYS } from "./planner";
 import {
   EQUIPMENT,
@@ -20,15 +29,27 @@ interface Props {
   onCancel?: () => void;
 }
 
-const STEPS = ["About you", "Goal", "Experience", "Schedule", "Equipment", "Body", "Review"] as const;
+const STEPS = ["About you", "Goal", "Experience", "Level", "Schedule", "Equipment", "Body", "Review"] as const;
+type StepName = (typeof STEPS)[number];
 
 export function Onboarding({ initial, onComplete, onCancel }: Props) {
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState<UserProfile>(initial);
   const update = (patch: Partial<UserProfile>) => setProfile((prev) => ({ ...prev, ...patch }));
+  const goTo = (name: StepName) => setStep(STEPS.indexOf(name));
+
+  // Changing any answer re-assigns the level; the user can still override it on the Level step.
+  const answer = (patch: Partial<AssessmentAnswers>) =>
+    setProfile((prev) => {
+      const assessment = { ...prev.assessment, ...patch };
+      return { ...prev, assessment, level: assessLevel(assessment).level };
+    });
 
   const weekdays = profile.weekdays ?? [];
-  const canContinue = STEPS[step] !== "Schedule" || (weekdays.length >= 2 && weekdays.length <= 6);
+  const recommended = assessLevel(profile.assessment);
+  const canContinue =
+    (STEPS[step] !== "Schedule" || (weekdays.length >= 2 && weekdays.length <= 6)) &&
+    (STEPS[step] !== "Experience" || isAssessmentComplete(profile.assessment));
   const isLast = step === STEPS.length - 1;
 
   const next = () => {
@@ -74,8 +95,47 @@ export function Onboarding({ initial, onComplete, onCancel }: Props) {
         )}
 
         {STEPS[step] === "Experience" && (
-          <Step title="How long have you been training consistently?">
-            <Choices options={LEVELS} selected={[profile.level]} onPick={(level) => update({ level })} />
+          <Step title="Let's find your starting level" subtitle="Answer honestly. We'll use this to pick exercises and how you progress.">
+            <h3 className="sub">How long have you been training consistently?</h3>
+            <Choices
+              options={TRAINING_TIME}
+              selected={profile.assessment.trainingTime ? [profile.assessment.trainingTime] : []}
+              onPick={(trainingTime) => answer({ trainingTime })}
+            />
+            <h3 className="sub">How many push-ups can you do in a row with good form?</h3>
+            <Choices
+              row
+              options={PUSH_UPS}
+              selected={profile.assessment.pushUps ? [profile.assessment.pushUps] : []}
+              onPick={(pushUps) => answer({ pushUps })}
+            />
+            <h3 className="sub">Which of these can you do with good form? <span className="optional">Pick any</span></h3>
+            <Choices
+              multi
+              options={LIFTS}
+              selected={profile.assessment.lifts}
+              onPick={(lift) => answer({ lifts: toggle(profile.assessment.lifts, lift) })}
+            />
+            <h3 className="sub">How often do your lifts still go up?</h3>
+            <Choices
+              options={PROGRESS_RATES}
+              selected={profile.assessment.progress ? [profile.assessment.progress] : []}
+              onPick={(progress) => answer({ progress })}
+            />
+            {!canContinue && <p className="warn">Answer the questions above to continue.</p>}
+          </Step>
+        )}
+
+        {STEPS[step] === "Level" && (
+          <Step title={`You're starting as ${labelOf(LEVELS, recommended.level)}`} subtitle={recommended.reason}>
+            <Choices
+              options={LEVELS.map((o) => (o.value === recommended.level ? { ...o, label: `${o.label} (recommended)` } : o))}
+              selected={[profile.level]}
+              onPick={(level) => update({ level })}
+            />
+            {profile.level !== recommended.level && (
+              <p className="warn">You've picked a different level than we recommend. You can change it any time.</p>
+            )}
           </Step>
         )}
 
@@ -145,27 +205,27 @@ export function Onboarding({ initial, onComplete, onCancel }: Props) {
         {STEPS[step] === "Review" && (
           <Step title={profile.name.trim() ? `Looking good, ${profile.name.trim()}` : "Looking good"} subtitle="Check your answers, then build your plan.">
             <dl className="review">
-              <ReviewRow label="Goal" value={labelOf(GOALS, profile.goal)} onEdit={() => setStep(1)} />
-              <ReviewRow label="Experience" value={labelOf(LEVELS, profile.level)} onEdit={() => setStep(2)} />
+              <ReviewRow label="Goal" value={labelOf(GOALS, profile.goal)} onEdit={() => goTo("Goal")} />
+              <ReviewRow label="Level" value={labelOf(LEVELS, profile.level)} onEdit={() => goTo("Experience")} />
               <ReviewRow
                 label="Schedule"
                 value={`${WEEKDAYS.filter((d) => weekdays.includes(d)).join(", ")} · ${profile.sessionMinutes} min`}
-                onEdit={() => setStep(3)}
+                onEdit={() => goTo("Schedule")}
               />
               <ReviewRow
                 label="Equipment"
                 value={profile.equipment.map((e) => labelOf(EQUIPMENT, e)).join(", ") || "Bodyweight only"}
-                onEdit={() => setStep(4)}
+                onEdit={() => goTo("Equipment")}
               />
               <ReviewRow
                 label="Work around"
                 value={(profile.limitations ?? []).map((l) => labelOf(LIMITATIONS, l)).join(", ") || "Nothing"}
-                onEdit={() => setStep(5)}
+                onEdit={() => goTo("Body")}
               />
               <ReviewRow
                 label="Extra focus"
                 value={(profile.focus ?? []).map((f) => labelOf(FOCUS_AREAS, f)).join(", ") || "None"}
-                onEdit={() => setStep(5)}
+                onEdit={() => goTo("Body")}
               />
             </dl>
           </Step>
@@ -203,14 +263,17 @@ function Choices<T extends string>({
   selected,
   onPick,
   multi = false,
+  row = false,
 }: {
   options: Option<T>[];
   selected: T[];
   onPick: (value: T) => void;
   multi?: boolean;
+  /** Lay short single-choice options out side by side. */
+  row?: boolean;
 }) {
   return (
-    <div className={multi ? "choices multi" : "choices"} role={multi ? "group" : "radiogroup"}>
+    <div className={multi || row ? "choices multi" : "choices"} role={multi ? "group" : "radiogroup"}>
       {options.map((o) => {
         const on = selected.includes(o.value);
         return (

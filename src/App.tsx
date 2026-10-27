@@ -66,7 +66,7 @@ function PlanView({
           <h2>Your profile</h2>
           <dl className="summary">
             <dt>Goal</dt><dd>{labelOf(GOALS, profile.goal)}</dd>
-            <dt>Training for</dt><dd>{labelOf(LEVELS, profile.level)}</dd>
+            <dt>Level</dt><dd>{labelOf(LEVELS, profile.level)}</dd>
             <dt>Sessions</dt><dd>{profile.sessionMinutes} min</dd>
             <dt>Equipment</dt>
             <dd>{profile.equipment.map((e) => labelOf(EQUIPMENT, e)).join(", ") || "Bodyweight only"}</dd>
@@ -123,7 +123,10 @@ function PlanView({
                   <tbody>
                     {day.exercises.map((ex) => (
                       <tr key={ex.name}>
-                        <td>{ex.name}</td>
+                        <td>
+                          {ex.name}
+                          <div className="hint">{ex.progression}</div>
+                        </td>
                         <td>{ex.sets}</td>
                         <td>{ex.reps}</td>
                         <td>{ex.restSeconds}s</td>
@@ -149,7 +152,33 @@ function PlanView({
           <div className="notes">
             <p><strong>Warm-up:</strong> {plan.warmUp}</p>
             <p><strong>Cool-down:</strong> {plan.coolDown}</p>
-            <p><strong>Progression:</strong> {plan.progression}</p>
+          </div>
+
+          <div className="notes progression">
+            <h2>How to progress</h2>
+            <p>{plan.progression.summary}</p>
+            <table>
+              <thead>
+                <tr><th>When</th><th>Effort</th><th>What to do</th></tr>
+              </thead>
+              <tbody>
+                {plan.progression.weeks.map((w) => (
+                  <tr key={w.week}>
+                    <td>{w.week}</td>
+                    <td>{w.effort}</td>
+                    <td>{w.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p><strong>For your goal:</strong> {plan.progression.goalTip}</p>
+            <h3>When to back off</h3>
+            <ul>
+              {plan.progression.backOff.map((tip) => <li key={tip}>{tip}</li>)}
+            </ul>
+            {plan.progression.levelUp && (
+              <p><strong>Moving up:</strong> {plan.progression.levelUp}</p>
+            )}
           </div>
         </section>
       </main>

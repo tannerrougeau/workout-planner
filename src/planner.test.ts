@@ -58,6 +58,32 @@ describe("generatePlan", () => {
   });
 });
 
+describe("progression", () => {
+  it("gives every exercise a next-step rule", () => {
+    for (const ex of generatePlan({ ...base, goal: "general" }).days.flatMap((d) => d.exercises)) {
+      expect(ex.progression.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("uses the exercise's own rep range and set count for loaded lifts", () => {
+    const ex = generatePlan(base).days[0].exercises.find((e) => byName.get(e.name)?.equipment.includes("barbell"));
+    expect(ex?.progression).toContain(`hit 10 reps on all ${ex?.sets} sets`);
+    expect(ex?.progression).toContain("start back at 6 reps");
+  });
+
+  it("ends every block with a lighter week", () => {
+    for (const level of ["beginner", "intermediate", "advanced"] as const) {
+      const weeks = generatePlan({ ...base, level }).progression.weeks;
+      expect(weeks.at(-1)?.effort).toMatch(/^4/);
+    }
+  });
+
+  it("only suggests levelling up below advanced", () => {
+    expect(generatePlan({ ...base, level: "beginner" }).progression.levelUp).toBeDefined();
+    expect(generatePlan({ ...base, level: "advanced" }).progression.levelUp).toBeUndefined();
+  });
+});
+
 describe("personalization", () => {
   it("schedules training on the chosen weekdays", () => {
     const plan = generatePlan({ ...base, weekdays: ["Sat", "Tue", "Thu"] });

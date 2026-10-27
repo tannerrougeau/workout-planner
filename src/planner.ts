@@ -32,6 +32,24 @@ export interface PlannedExercise {
   /** e.g. "6–10" or "30–45s". */
   reps: string;
   restSeconds: number;
+  /** What to change next time once this exercise feels manageable. */
+  progression: string;
+}
+
+export interface ProgressionWeek {
+  week: string;
+  /** Target effort as reps in reserve, e.g. "3 RIR". */
+  effort: string;
+  detail: string;
+}
+
+export interface ProgressionGuide {
+  summary: string;
+  weeks: ProgressionWeek[];
+  goalTip: string;
+  backOff: string[];
+  /** When to move up an experience level; absent for advanced lifters. */
+  levelUp?: string;
 }
 
 export interface WorkoutDay {
@@ -47,7 +65,7 @@ export interface WorkoutPlan {
   days: WorkoutDay[];
   warmUp: string;
   coolDown: string;
-  progression: string;
+  progression: ProgressionGuide;
 }
 
 type DayTemplate = { title: string; slots: Pattern[] };
@@ -164,7 +182,7 @@ export function generatePlan(input: PlanInput): WorkoutPlan {
       patternUses.set(pattern, uses + 1);
       usedToday.add(exercise.name);
       seconds += cost;
-      exercises.push({ name: exercise.name, pattern, ...p });
+      exercises.push({ name: exercise.name, pattern, ...p, progression: exerciseProgression(exercise, p) });
     }
 
     return {
@@ -181,21 +199,84 @@ export function generatePlan(input: PlanInput): WorkoutPlan {
     days,
     warmUp: `${WARM_UP_MINUTES} min: light cardio, then dynamic mobility (leg swings, arm circles, hip openers) and 1–2 light sets of the first exercise.`,
     coolDown: `${COOL_DOWN_MINUTES} min: easy walk, then static stretches for the muscles trained, 20–30s each.`,
-    progression: progressionAdvice(input.goal, input.level),
+    progression: progressionGuide(input.goal, input.level),
   };
 }
 
-function progressionAdvice(goal: Goal, level: Level): string {
-  const byLevel: Record<Level, string> = {
-    beginner: "Add a little weight or 1–2 reps each session while form stays solid. Leave 2–3 reps in reserve on every set.",
-    intermediate: "Progress weekly: once you hit the top of the rep range on all sets, add weight and drop back to the bottom of the range.",
-    advanced: "Run 4-week blocks: build load over 3 weeks, then deload (about 60% volume) in week 4.",
-  };
-  const byGoal: Record<Goal, string> = {
-    strength: "Prioritise load on the first two lifts of each day.",
-    hypertrophy: "Prioritise total quality reps; take accessories close to failure.",
-    endurance: "Shorten rest periods by 5–10s every couple of weeks.",
-    general: "Rotate in new exercises every 4–6 weeks to keep things fresh.",
-  };
-  return `${byLevel[level]} ${byGoal[goal]}`;
+const LOWER_BODY_PATTERNS: ReadonlySet<Pattern> = new Set(["squat", "hinge", "lunge", "calves"]);
+
+/** The next step for one exercise: double progression for loaded lifts, harder variations for bodyweight. */
+function exerciseProgression(exercise: Exercise, p: Prescription): string {
+  if (exercise.pattern === "conditioning") {
+    return "Add 1 round each week up to 10, then cut the rest to 20s.";
+  }
+  if (exercise.timed) {
+    return "Add 5–10s per hold each week; once 60s is easy, move to a harder variation.";
+  }
+
+  const [bottom, top] = p.reps.split("–");
+  const target = `Once you hit ${top} reps on ${p.sets === 2 ? "both" : `all ${p.sets}`} sets`;
+  const has = (q: Equipment) => exercise.equipment.includes(q);
+
+  if (has("barbell") || has("machines")) {
+    const step = LOWER_BODY_PATTERNS.has(exercise.pattern) && !ACCESSORY_PATTERNS.has(exercise.pattern) ? "5 kg / 10 lb" : "2.5 kg / 5 lb";
+    return `${target}, add ${step} and start back at ${bottom} reps.`;
+  }
+  if (has("dumbbells")) return `${target}, move up to the next dumbbell (about 2 kg / 5 lb) and start back at ${bottom} reps.`;
+  if (has("kettlebell")) return `${target}, move up a bell size or slow the lowering to 3s.`;
+  if (has("bands")) return `${target}, switch to a heavier band or stand further from the anchor.`;
+  return `${target}, slow the lowering to 3s, then move to a harder variation or add weight (e.g. a loaded backpack).`;
+}
+
+const BLOCKS: Record<Level, { summary: string; weeks: ProgressionWeek[] }> = {
+  beginner: {
+    summary:
+      "You'll progress fastest now: add a little load or a rep almost every session. RIR (reps in reserve) is how many more good-form reps you could have done.",
+    weeks: [
+      { week: "Weeks 1–2", effort: "3 RIR", detail: "Learn the movements. Pick weights that feel easy and keep every rep clean." },
+      { week: "Weeks 3–8", effort: "2 RIR", detail: "Add a little weight or 1 rep each session, following each exercise's rule." },
+      { week: "Week 9", effort: "4 RIR", detail: "Lighter week: same weights, half the sets. Then start a new 8 weeks a little heavier." },
+    ],
+  },
+  intermediate: {
+    summary: "Progress week to week in 4-week waves. Each wave starts slightly heavier than the last.",
+    weeks: [
+      { week: "Week 1", effort: "3 RIR", detail: "Base week: set your working weights at a comfortable effort." },
+      { week: "Week 2", effort: "2 RIR", detail: "Add 1 rep per set, or add weight where the exercise's rule says so." },
+      { week: "Week 3", effort: "1 RIR", detail: "Push week: beat week 2 on reps or weight on every main lift." },
+      { week: "Week 4", effort: "4 RIR", detail: "Deload: same weights, half the sets. Next wave starts at week 2's weights." },
+    ],
+  },
+  advanced: {
+    summary: "Run 4-week blocks that build volume, then intensity, then back off. Log every session to track trends.",
+    weeks: [
+      { week: "Week 1", effort: "2–3 RIR", detail: "Accumulate: add 1 set to the first two exercises of each day." },
+      { week: "Week 2", effort: "2 RIR", detail: "Keep the extra set and add load or reps." },
+      { week: "Week 3", effort: "0–1 RIR", detail: "Intensify: drop the extra set; take one top set per main lift close to your limit." },
+      { week: "Week 4", effort: "4+ RIR", detail: "Deload: about 60% of normal sets at moderate weights." },
+    ],
+  },
+};
+
+const GOAL_TIPS: Record<Goal, string> = {
+  strength: "Put your effort into the first two lifts of each day; add weight there before anywhere else.",
+  hypertrophy: "Total quality reps drive growth: take accessories closer to failure (0–1 RIR) than the main lifts.",
+  endurance: "Besides adding reps, shorten rest by 5–10s every couple of weeks.",
+  general: "Progress steadily rather than fast, and rotate in new exercises every 4–6 weeks.",
+};
+
+const BACK_OFF = [
+  "Stuck at the same weight and reps for 2 sessions in a row? Drop the weight 10% and build back up.",
+  "Joint pain (not muscle soreness) on an exercise? Swap it out with ⇄.",
+  "Slept badly or still very sore? Train at your week-1 effort that day.",
+  "Missed a week? Repeat your last week instead of moving ahead.",
+];
+
+const LEVEL_UP: Partial<Record<Level, string>> = {
+  beginner: "Once you can't add weight from one session to the next (usually 3–6 months in), change your experience to Intermediate.",
+  intermediate: "When a full wave no longer moves your numbers for a couple of months, change your experience to Advanced.",
+};
+
+function progressionGuide(goal: Goal, level: Level): ProgressionGuide {
+  return { ...BLOCKS[level], goalTip: GOAL_TIPS[goal], backOff: BACK_OFF, levelUp: LEVEL_UP[level] };
 }

@@ -15,9 +15,9 @@ export const GOALS: Option<Goal>[] = [
 ];
 
 export const LEVELS: Option<Level>[] = [
-  { value: "beginner", label: "Under 6 months", hint: "New to training, or coming back after a long break" },
-  { value: "intermediate", label: "6 months – 2 years", hint: "Comfortable with the main lifts" },
-  { value: "advanced", label: "2+ years", hint: "Consistent training with steady progress" },
+  { value: "beginner", label: "Beginner", hint: "Simpler movements, progress almost every session" },
+  { value: "intermediate", label: "Intermediate", hint: "Main lifts, progress week to week in 4-week waves" },
+  { value: "advanced", label: "Advanced", hint: "Harder variations, block-based programming" },
 ];
 
 export const EQUIPMENT: Option<Equipment>[] = [
