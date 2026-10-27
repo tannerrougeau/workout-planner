@@ -38,7 +38,7 @@ export interface PlannedExercise {
 
 export interface ProgressionWeek {
   week: string;
-  /** Target effort as reps in reserve, e.g. "3 RIR". */
+  /** Target effort in plain words, e.g. "Easy" or "Light". */
   effort: string;
   detail: string;
 }
@@ -207,74 +207,68 @@ const LOWER_BODY_PATTERNS: ReadonlySet<Pattern> = new Set(["squat", "hinge", "lu
 
 /** The next step for one exercise: double progression for loaded lifts, harder variations for bodyweight. */
 function exerciseProgression(exercise: Exercise, p: Prescription): string {
-  if (exercise.pattern === "conditioning") {
-    return "Add 1 round each week up to 10, then cut the rest to 20s.";
-  }
-  if (exercise.timed) {
-    return "Add 5–10s per hold each week; once 60s is easy, move to a harder variation.";
-  }
+  if (exercise.pattern === "conditioning") return "Add a round each week.";
+  if (exercise.timed) return "Hold 5s longer each week.";
 
-  const [bottom, top] = p.reps.split("–");
-  const target = `Once you hit ${top} reps on ${p.sets === 2 ? "both" : `all ${p.sets}`} sets`;
+  const top = p.reps.split("–")[1];
+  const target = `Hit ${top} reps on every set?`;
   const has = (q: Equipment) => exercise.equipment.includes(q);
 
   if (has("barbell") || has("machines")) {
     const step = LOWER_BODY_PATTERNS.has(exercise.pattern) && !ACCESSORY_PATTERNS.has(exercise.pattern) ? "5 kg / 10 lb" : "2.5 kg / 5 lb";
-    return `${target}, add ${step} and start back at ${bottom} reps.`;
+    return `${target} Add ${step}.`;
   }
-  if (has("dumbbells")) return `${target}, move up to the next dumbbell (about 2 kg / 5 lb) and start back at ${bottom} reps.`;
-  if (has("kettlebell")) return `${target}, move up a bell size or slow the lowering to 3s.`;
-  if (has("bands")) return `${target}, switch to a heavier band or stand further from the anchor.`;
-  return `${target}, slow the lowering to 3s, then move to a harder variation or add weight (e.g. a loaded backpack).`;
+  if (has("dumbbells")) return `${target} Go up one dumbbell.`;
+  if (has("kettlebell")) return `${target} Use a heavier bell.`;
+  if (has("bands")) return `${target} Use a heavier band.`;
+  return `${target} Try a harder version.`;
 }
 
 const BLOCKS: Record<Level, { summary: string; weeks: ProgressionWeek[] }> = {
   beginner: {
-    summary:
-      "You'll progress fastest now: add a little load or a rep almost every session. RIR (reps in reserve) is how many more good-form reps you could have done.",
+    summary: "Add a little weight or one rep most sessions.",
     weeks: [
-      { week: "Weeks 1–2", effort: "3 RIR", detail: "Learn the movements. Pick weights that feel easy and keep every rep clean." },
-      { week: "Weeks 3–8", effort: "2 RIR", detail: "Add a little weight or 1 rep each session, following each exercise's rule." },
-      { week: "Week 9", effort: "4 RIR", detail: "Lighter week: same weights, half the sets. Then start a new 8 weeks a little heavier." },
+      { week: "Weeks 1–2", effort: "Easy", detail: "Learn the moves with light weights." },
+      { week: "Weeks 3–8", effort: "Moderate", detail: "Add a little weight or a rep each session." },
+      { week: "Week 9", effort: "Light", detail: "Do half the sets, then start again a bit heavier." },
     ],
   },
   intermediate: {
-    summary: "Progress week to week in 4-week waves. Each wave starts slightly heavier than the last.",
+    summary: "Repeat a 4-week cycle, starting a bit heavier each time.",
     weeks: [
-      { week: "Week 1", effort: "3 RIR", detail: "Base week: set your working weights at a comfortable effort." },
-      { week: "Week 2", effort: "2 RIR", detail: "Add 1 rep per set, or add weight where the exercise's rule says so." },
-      { week: "Week 3", effort: "1 RIR", detail: "Push week: beat week 2 on reps or weight on every main lift." },
-      { week: "Week 4", effort: "4 RIR", detail: "Deload: same weights, half the sets. Next wave starts at week 2's weights." },
+      { week: "Week 1", effort: "Easy", detail: "Set your weights." },
+      { week: "Week 2", effort: "Moderate", detail: "Add a rep or a little weight." },
+      { week: "Week 3", effort: "Hard", detail: "Beat last week." },
+      { week: "Week 4", effort: "Light", detail: "Do half the sets to recover." },
     ],
   },
   advanced: {
-    summary: "Run 4-week blocks that build volume, then intensity, then back off. Log every session to track trends.",
+    summary: "Repeat a 4-week cycle: more sets, then heavier, then recover.",
     weeks: [
-      { week: "Week 1", effort: "2–3 RIR", detail: "Accumulate: add 1 set to the first two exercises of each day." },
-      { week: "Week 2", effort: "2 RIR", detail: "Keep the extra set and add load or reps." },
-      { week: "Week 3", effort: "0–1 RIR", detail: "Intensify: drop the extra set; take one top set per main lift close to your limit." },
-      { week: "Week 4", effort: "4+ RIR", detail: "Deload: about 60% of normal sets at moderate weights." },
+      { week: "Week 1", effort: "Moderate", detail: "Add a set to your first two exercises." },
+      { week: "Week 2", effort: "Moderate", detail: "Keep the extra set and add weight or reps." },
+      { week: "Week 3", effort: "Hard", detail: "Drop the extra set and go heavy." },
+      { week: "Week 4", effort: "Light", detail: "Do about half your usual sets." },
     ],
   },
 };
 
 const GOAL_TIPS: Record<Goal, string> = {
-  strength: "Put your effort into the first two lifts of each day; add weight there before anywhere else.",
-  hypertrophy: "Total quality reps drive growth: take accessories closer to failure (0–1 RIR) than the main lifts.",
-  endurance: "Besides adding reps, shorten rest by 5–10s every couple of weeks.",
-  general: "Progress steadily rather than fast, and rotate in new exercises every 4–6 weeks.",
+  strength: "Add weight to your first two lifts before anything else.",
+  hypertrophy: "Push your last few exercises close to failure.",
+  endurance: "Cut your rest by 5–10s every couple of weeks.",
+  general: "Swap in new exercises every 4–6 weeks.",
 };
 
 const BACK_OFF = [
-  "Stuck at the same weight and reps for 2 sessions in a row? Drop the weight 10% and build back up.",
-  "Joint pain (not muscle soreness) on an exercise? Swap it out with ⇄.",
-  "Slept badly or still very sore? Train at your week-1 effort that day.",
-  "Missed a week? Repeat your last week instead of moving ahead.",
+  "Stuck for 2 sessions? Drop the weight 10% and build back up.",
+  "Joint pain? Swap the exercise with ⇄.",
+  "Tired or missed a week? Repeat last week.",
 ];
 
 const LEVEL_UP: Partial<Record<Level, string>> = {
-  beginner: "Once you can't add weight from one session to the next (usually 3–6 months in), change your experience to Intermediate.",
-  intermediate: "When a full wave no longer moves your numbers for a couple of months, change your experience to Advanced.",
+  beginner: "Can't add weight each session anymore? Switch to Intermediate.",
+  intermediate: "No progress over a couple of cycles? Switch to Advanced.",
 };
 
 function progressionGuide(goal: Goal, level: Level): ProgressionGuide {
