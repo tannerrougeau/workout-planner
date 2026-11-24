@@ -1,5 +1,6 @@
 import { useMemo, useState, type PointerEvent } from "react";
 import { exerciseSeries, formatWeight, personalBests, type SeriesPoint } from "./progress";
+import { weightIn } from "./units";
 import { fromLocalDate, type SessionLog, type Units } from "./workoutLog";
 
 const FEELING_LABEL = { easy: "Too easy", right: "Just right", hard: "Too hard" } as const;
@@ -41,7 +42,7 @@ export function History({ sessions, units, onDelete }: Props) {
           </div>
 
           <ol className="sessions">
-            {sessions.map((s, i) => ({ s, bests: personalBests(s, sessions.slice(0, i)) })).reverse().map(({ s, bests }) => (
+            {sessions.map((s, i) => ({ s, bests: personalBests(s, sessions.slice(0, i), units) })).reverse().map(({ s, bests }) => (
               <li key={s.id} className="session">
                 <div className="session-head">
                   <strong>{fromLocalDate(s.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</strong>
@@ -60,7 +61,7 @@ export function History({ sessions, units, onDelete }: Props) {
                 <ul>
                   {s.exercises.map((e) => (
                     <li key={e.name}>
-                      {e.name}: {e.values.length > 0 ? `${e.weight !== undefined ? `${formatWeight(e.weight, units)} × ` : ""}${e.values.join(", ")}` : "not logged"}
+                      {e.name}: {e.values.length > 0 ? `${e.weight !== undefined ? `${formatWeight(weightIn(e, units)!, units)} × ` : ""}${e.values.join(", ")}` : "not logged"}
                       {bests.includes(e.name) && <span className="pill best">New best</span>}
                       {e.trouble && <span className="pill trouble">Trouble</span>}
                     </li>

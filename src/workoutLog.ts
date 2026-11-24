@@ -5,8 +5,10 @@ export type Units = "kg" | "lb";
 
 export interface ExerciseLog {
   name: string;
-  /** Load used, in the profile's units; absent for bodyweight and band exercises. */
+  /** Load used, as typed; absent for bodyweight and band exercises. */
   weight?: number;
+  /** The unit `weight` was typed in. Always set on new logs; older ones are tagged by `migrateUnits`. */
+  unit?: Units;
   /** Reps (or seconds, or rounds) completed on each set. */
   values: number[];
   /** Flagged as causing pain or form trouble. */
@@ -33,7 +35,29 @@ export interface Draft {
   weekday: string;
   dayTitle: string;
   startedAt: number;
+  /** Unit of the typed weights; drafts saved before this existed are in the profile's units. */
+  units?: Units;
   entries: DraftEntry[];
+}
+
+/**
+ * Tags weighted entries that have no unit with `unit` (the profile's unit when they were logged,
+ * since switching units never converted anything). Safe to run repeatedly: tagged entries are left alone.
+ */
+export function migrateUnits(sessions: SessionLog[], unit: Units): { sessions: SessionLog[]; tagged: number } {
+  let tagged = 0;
+  const out = sessions.map((s) => {
+    if (!s.exercises.some((e) => e.weight !== undefined && !e.unit)) return s;
+    return {
+      ...s,
+      exercises: s.exercises.map((e) => {
+        if (e.weight === undefined || e.unit) return e;
+        tagged++;
+        return { ...e, unit };
+      }),
+    };
+  });
+  return { sessions: out, tagged };
 }
 
 export interface DraftEntry {

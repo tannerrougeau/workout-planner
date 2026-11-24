@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Level } from "./exercises";
 import type { PlannedExercise, WorkoutDay } from "./planner";
 import { VideoButton } from "./VideoButton";
+import { oneDecimal, toUnit, weightIn } from "./units";
 import { formatWeight, measureOf, nextTarget, personalBests, recentLogs, sessionVolume, setsToLog, takesWeight } from "./progress";
 import {
   clearDraft,
@@ -38,23 +39,37 @@ const FEELINGS: { value: Feeling; label: string }[] = [
 const MEASURE_LABEL = { reps: "Reps", seconds: "Secs", rounds: "Rounds" } as const;
 
 function freshEntry(ex: PlannedExercise, sessions: SessionLog[], units: Units): DraftEntry {
-  const weight = nextTarget(ex, sessions, units)?.weight ?? recentLogs(ex.name, sessions, 1)[0]?.weight;
+  const last = recentLogs(ex.name, sessions, 1)[0];
+  const weight = nextTarget(ex, sessions, units)?.weight ?? (last && weightIn(last, units));
   return {
     name: ex.name,
-    weight: weight !== undefined ? String(weight) : "",
+    weight: weight !== undefined ? String(oneDecimal(weight)) : "",
     sets: Array.from({ length: setsToLog(ex) }, () => ({ value: "", done: false })),
     trouble: false,
   };
 }
 
+/** Converts typed weights to another unit, to one decimal; blank or unparseable ones are left as typed. */
+function convertEntries(entries: DraftEntry[], from: Units, to: Units): DraftEntry[] {
+  if (from === to) return entries;
+  return entries.map((e) => {
+    const w = Number(e.weight);
+    return e.weight !== "" && Number.isFinite(w) ? { ...e, weight: String(oneDecimal(toUnit(w, from, to))) } : e;
+  });
+}
+
 /** Resumes a saved workout where its exercises still match by name; anything new starts fresh. */
 function startDraft(day: WorkoutDay, sessions: SessionLog[], units: Units, resumed?: Draft): Draft {
   const matched = resumed ? matchDraftEntries(resumed, day.exercises.map((ex) => ({ name: ex.name, sets: setsToLog(ex) }))) : [];
+  // Units may have been switched in Settings while the workout was minimized.
+  const resumedEntries = convertEntries(matched.filter((e): e is DraftEntry => e !== undefined), resumed?.units ?? units, units);
+  let next = 0;
   return {
     weekday: day.weekday,
     dayTitle: day.title,
     startedAt: resumed && matched.some(Boolean) ? resumed.startedAt : Date.now(),
-    entries: day.exercises.map((ex, i) => matched[i] ?? freshEntry(ex, sessions, units)),
+    units,
+    entries: day.exercises.map((ex, i) => (matched[i] ? resumedEntries[next++] : freshEntry(ex, sessions, units))),
   };
 }
 
@@ -110,6 +125,11 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
     }
   }, [restLeft]);
 
+  const switchUnits = (to: Units) => {
+    setDraft((d) => ({ ...d, units: to, entries: convertEntries(d.entries, d.units ?? units, to) }));
+    onUnitsChange(to);
+  };
+
   const updateEntry = (i: number, patch: Partial<DraftEntry>) =>
     setDraft((d) => ({ ...d, entries: d.entries.map((e, j) => (j === i ? { ...e, ...patch } : e)) }));
 
@@ -132,7 +152,7 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
     return [{
       name: ex.name,
       values,
-      ...(takesWeight(ex) && entry.weight !== "" && weight > 0 ? { weight } : {}),
+      ...(takesWeight(ex) && entry.weight !== "" && weight > 0 ? { weight, unit: draft.units ?? units } : {}),
       ...(entry.trouble ? { trouble: true } : {}),
     }];
   });
@@ -161,8 +181,8 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
   };
 
   if (phase === "finish") {
-    const bests = personalBests({ exercises }, sessions);
-    const volume = sessionVolume({ exercises });
+    const bests = personalBests({ exercises }, sessions, units);
+    const volume = sessionVolume({ exercises }, units);
     return (
       <section className="workout finish">
         <div className="screen-head">
@@ -182,7 +202,7 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
               <ul>
                 {bests.map((name) => {
                   const e = exercises.find((x) => x.name === name)!;
-                  return <li key={name}><strong>{name}</strong> {e.weight !== undefined ? formatWeight(e.weight, units) : `${Math.max(...e.values)}`}</li>;
+                  return <li key={name}><strong>{name}</strong> {e.weight !== undefined ? formatWeight(weightIn(e, units)!, units) : `${Math.max(...e.values)}`}</li>;
                 })}
               </ul>
             </div>
@@ -237,7 +257,7 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
         </div>
         <div className="segmented" role="radiogroup" aria-label="Weight units">
           {(["kg", "lb"] as const).map((u) => (
-            <button key={u} type="button" role="radio" aria-checked={units === u} className={units === u ? "chip small on" : "chip small"} onClick={() => onUnitsChange(u)}>
+            <button key={u} type="button" role="radio" aria-checked={units === u} className={units === u ? "chip small on" : "chip small"} onClick={() => switchUnits(u)}>
               {u}
             </button>
           ))}
@@ -251,6 +271,7 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
         const entry = draft.entries[i];
         const target = nextTarget(ex, sessions, units);
         const previous = recentLogs(ex.name, sessions, 1)[0];
+        const previousWeight = previous && weightIn(previous, units);
         const measure = measureOf(ex);
         const fallback = String(target?.value ?? ex.reps.match(/\d+/)?.[0] ?? "");
         return (
@@ -289,7 +310,7 @@ export function LogWorkout({ day, level, units, sessions, draft: resumed, onUnit
                     <td className="set-no">{s + 1}</td>
                     <td className="prev">
                       {previous?.values[s] !== undefined
-                        ? `${previous.weight !== undefined ? `${Number(previous.weight.toFixed(1))} × ` : ""}${previous.values[s]}`
+                        ? `${previousWeight !== undefined ? `${oneDecimal(previousWeight)} × ` : ""}${previous.values[s]}`
                         : "–"}
                     </td>
                     <td>

@@ -430,3 +430,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Backup */
+.backup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.backup-reminder { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--warn-soft); color: var(--warn); border-radius: var(--radius-sm); padding: 10px 14px; font-weight: 600; font-size: 15px; }
+.backup-reminder .link { color: inherit; padding: 0 4px; }
+.error { color: var(--bad); font-size: 14px; }
