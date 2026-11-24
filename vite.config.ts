@@ -1,16 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
   // Relative asset paths so the build works under GitHub Pages' /workout-planner/ subpath
   // and at the root of Netlify preview links.
   base: "./",
+  // Recorded in backups so a file can be traced to the app version that wrote it.
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   plugins: [
     react(),
-    // Makes the site installable and usable offline; installed copies update themselves after each deploy.
+    // Makes the site installable and usable offline. src/updates.ts registers the service worker,
+    // checks for new deploys while the app is open, and applies them outside of a workout.
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
+      injectRegister: false,
       // Cache the bundled fonts too, so the app looks the same offline.
       workbox: { globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"] },
       includeAssets: ["favicon.ico", "apple-touch-icon-180x180.png"],
