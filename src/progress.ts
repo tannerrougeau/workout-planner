@@ -1,5 +1,6 @@
 import { EXERCISES, type Level } from "./exercises";
 import type { PlannedExercise, ProgressionWeek } from "./planner";
+import { oneDecimal, roundToLoadable, toUnit, weightIn } from "./units";
 import { fromLocalDate, toLocalDate, type ExerciseLog, type SessionLog, type Units } from "./workoutLog";
 
 const BY_NAME = new Map(EXERCISES.map((e) => [e.name, e]));
@@ -40,7 +41,7 @@ function repRange(reps: string): { bottom: number; top: number } | undefined {
 }
 
 export function formatWeight(w: number, units: Units): string {
-  return `${Number(w.toFixed(1))} ${units}`;
+  return `${oneDecimal(w)} ${units}`;
 }
 
 /** Most recent logs of an exercise that recorded at least one set, newest first. */
@@ -81,7 +82,11 @@ export function nextTarget(ex: PlannedExercise, sessions: SessionLog[], units: U
 
   const range = repRange(ex.reps);
   if (!range) return undefined;
-  const weight = takesWeight(ex) ? last.weight : undefined;
+  // Weights are compared and suggested in the display units. A weight logged in the other unit
+  // is converted and rounded to something loadable (100 kg → 220 lb, not 220.46).
+  const lastWeight = takesWeight(ex) ? weightIn(last, units) : undefined;
+  const converted = (last.unit ?? units) !== units;
+  const weight = lastWeight !== undefined && converted ? roundToLoadable(lastWeight, ex, units) : lastWeight;
   const step = weightStep(ex, units);
   const withWeight = (w: number | undefined, reps: number) => (w ? `${formatWeight(w, units)} × ${reps}` : `${reps} reps`);
 
@@ -92,9 +97,11 @@ export function nextTarget(ex: PlannedExercise, sessions: SessionLog[], units: U
   }
 
   // Stuck: same load as the time before and no more total reps.
-  const stalled = prev !== undefined && prev.weight === last.weight && sum(last.values) <= sum(prev.values);
-  if (stalled && weight) {
-    const lighter = Math.max(step, Math.round((weight * 0.9) / step) * step);
+  const sameLoad = (a: ExerciseLog, b: ExerciseLog) =>
+    a.weight === undefined || b.weight === undefined ? a.weight === b.weight : Math.abs(weightIn(a, "kg")! - weightIn(b, "kg")!) < 0.05;
+  const stalled = prev !== undefined && sameLoad(prev, last) && sum(last.values) <= sum(prev.values);
+  if (stalled && weight && lastWeight) {
+    const lighter = roundToLoadable(lastWeight * 0.9, ex, units);
     return { weight: lighter, value: range.bottom, text: withWeight(lighter, range.bottom), why: "backOff" };
   }
 
@@ -190,8 +197,8 @@ export function exerciseSeries(name: string, sessions: SessionLog[], units: Unit
       .filter(({ e }) => !byWeight || e.weight !== undefined)
       .map(({ date, e }) => ({
         date,
-        value: byWeight ? e.weight! : Math.max(...e.values),
-        detail: `${e.weight !== undefined ? `${formatWeight(e.weight, units)} × ` : ""}${e.values.join(", ")}`,
+        value: byWeight ? oneDecimal(weightIn(e, units)!) : Math.max(...e.values),
+        detail: `${e.weight !== undefined ? `${formatWeight(weightIn(e, units)!, units)} × ` : ""}${e.values.join(", ")}`,
       })),
   };
 }
@@ -228,22 +235,26 @@ export function weeklyProgress(sessions: SessionLog[], goal: number, today: Date
   return { done, goal, streak };
 }
 
-/** Exercises in a session that beat every earlier log: a heavier weight, or a better best set without weight. */
-export function personalBests(session: Pick<SessionLog, "exercises">, earlier: SessionLog[]): string[] {
+/**
+ * Exercises in a session that beat every earlier log: a heavier weight, or a better best set without weight.
+ * Weights are compared in kg; `units` only applies to untagged entries.
+ */
+export function personalBests(session: Pick<SessionLog, "exercises">, earlier: SessionLog[], units: Units = "kg"): string[] {
+  const kg = (e: ExerciseLog) => (e.weight === undefined ? 0 : toUnit(e.weight, e.unit ?? units, "kg"));
   return session.exercises.flatMap((e) => {
     if (e.values.length === 0) return [];
     const prior = earlier.flatMap((s) => s.exercises.filter((x) => x.name === e.name && x.values.length > 0));
     if (prior.length === 0) return [];
     if (e.weight !== undefined) {
-      const best = Math.max(...prior.map((x) => x.weight ?? 0));
-      return e.weight > best ? [e.name] : [];
+      const best = Math.max(...prior.map(kg));
+      return kg(e) > best + 0.01 ? [e.name] : [];
     }
     const best = Math.max(...prior.flatMap((x) => x.values));
     return Math.max(...e.values) > best ? [e.name] : [];
   });
 }
 
-/** Total weight moved: weight × reps, summed over weighted exercises. */
-export function sessionVolume(session: Pick<SessionLog, "exercises">): number {
-  return session.exercises.reduce((total, e) => total + (e.weight ?? 0) * sum(e.values), 0);
+/** Total weight moved, in `units`: weight × reps, summed over weighted exercises. */
+export function sessionVolume(session: Pick<SessionLog, "exercises">, units: Units = "kg"): number {
+  return session.exercises.reduce((total, e) => total + (weightIn(e, units) ?? 0) * sum(e.values), 0);
 }

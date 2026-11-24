@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { applyRestore, loadAppData, undoRestore, type Backup } from "./backup";
+import { BackupCard, UnitsMigrationNotice } from "./BackupCard";
 import { History } from "./History";
 import { LogWorkout } from "./LogWorkout";
 import { Onboarding } from "./Onboarding";
@@ -6,13 +8,33 @@ import { VideoButton } from "./VideoButton";
 import { EQUIPMENT, FOCUS_AREAS, GOALS, LEVELS, LIMITATIONS, labelOf } from "./options";
 import { WEEKDAYS, generatePlan, type WorkoutPlan } from "./planner";
 import { DEFAULT_PROFILE, clearProfile, loadProfile, saveProfile, type UserProfile } from "./profile";
+import { requestPersistentStorage, updateMeta } from "./meta";
 import { cyclePosition, nextTarget, suggestions, weeklyProgress, type Suggestion, type WeeklyProgress } from "./progress";
-import { fromLocalDate, loadDraft, loadSessions, saveSessions, sortByDate, type SessionLog } from "./workoutLog";
+import { fromLocalDate, loadDraft, loadSessions, migrateUnits, saveSessions, sortByDate, type SessionLog } from "./workoutLog";
+
+/**
+ * Loads saved data, tagging any logged weights that predate unit tracking with the profile's unit.
+ * Runs on every start, but only changes anything the first time.
+ */
+function loadStartupData(): { profile: UserProfile | null; sessions: SessionLog[] } {
+  const profile = loadProfile();
+  const loaded = loadSessions();
+  if (!profile) return { profile, sessions: loaded };
+  const { sessions, tagged } = migrateUnits(loaded, profile.units);
+  if (tagged > 0) {
+    saveSessions(sessions);
+    updateMeta({ unitsMigration: { count: tagged, unit: profile.units, at: Date.now() } });
+  }
+  return { profile, sessions };
+}
 
 export function App() {
-  const [profile, setProfile] = useState<UserProfile | null>(() => loadProfile());
+  const [startup] = useState(loadStartupData);
+  const [profile, setProfile] = useState<UserProfile | null>(startup.profile);
   const [editing, setEditing] = useState(false);
-  const [sessions, setSessions] = useState<SessionLog[]>(() => loadSessions());
+  const [sessions, setSessions] = useState<SessionLog[]>(startup.sessions);
+  // Bumped after a restore or undo so the plan view reloads its saved draft and reopens on Profile.
+  const [generation, setGeneration] = useState(0);
 
   const save = (next: UserProfile) => {
     saveProfile(next);
@@ -24,6 +46,15 @@ export function App() {
     const sorted = sortByDate(next);
     saveSessions(sorted);
     setSessions(sorted);
+    // Once there's training data worth keeping, ask the browser not to evict it (asked only once).
+    if (sorted.length > 0) void requestPersistentStorage();
+  };
+
+  const reloadFromStorage = () => {
+    const data = loadAppData();
+    setProfile(data.profile);
+    setSessions(data.sessions);
+    setGeneration((g) => g + 1);
   };
 
   if (!profile || editing) {
@@ -40,6 +71,8 @@ export function App() {
 
   return (
     <PlanView
+      key={generation}
+      initialScreen={generation > 0 ? "profile" : "plan"}
       profile={profile}
       sessions={sessions}
       onChange={save}
@@ -48,6 +81,14 @@ export function App() {
       onReset={() => {
         clearProfile();
         setProfile(null);
+      }}
+      onRestore={(backup) => {
+        const { tagged } = applyRestore(backup);
+        if (tagged > 0) updateMeta({ unitsMigration: { count: tagged, unit: backup.profile.units, at: Date.now() } });
+        reloadFromStorage();
+      }}
+      onUndoRestore={() => {
+        if (undoRestore()) reloadFromStorage();
       }}
     />
   );
@@ -74,27 +115,44 @@ function defaultDay(plan: WorkoutPlan, today: string): number {
 const shortDate = (date: string) => fromLocalDate(date).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 function PlanView({
+  initialScreen,
   profile,
   sessions,
   onChange,
   onSessionsChange,
   onEdit,
   onReset,
+  onRestore,
+  onUndoRestore,
 }: {
+  initialScreen: "plan" | "profile";
   profile: UserProfile;
   sessions: SessionLog[];
   onChange: (profile: UserProfile) => void;
   onSessionsChange: (sessions: SessionLog[]) => void;
   onEdit: () => void;
   onReset: () => void;
+  onRestore: (backup: Backup) => void;
+  onUndoRestore: () => void;
 }) {
   const plan = useMemo(() => generatePlan(profile), [profile]);
   const excluded = profile.excluded ?? [];
   const name = profile.name.trim();
   const today = todayLabel();
-  const [screen, setScreen] = useState<Screen>({ kind: "plan" });
+  const [screen, setScreen] = useState<Screen>({ kind: initialScreen });
   const [selected, setSelected] = useState(() => defaultDay(plan, today));
   const [dismissed, setDismissed] = useState<string[]>([]);
+  // The last swapped-out exercise, offered back for a few seconds in case the tap was a slip.
+  const [undoSwap, setUndoSwap] = useState<string | undefined>();
+  useEffect(() => {
+    if (!undoSwap) return;
+    const id = window.setTimeout(() => setUndoSwap(undefined), 6000);
+    return () => window.clearTimeout(id);
+  }, [undoSwap]);
+  const swapOut = (name: string) => {
+    onChange({ ...profile, excluded: [...excluded, name] });
+    setUndoSwap(name);
+  };
   const [draft, setDraft] = useState(() => loadDraft());
   const draftDay = draft ? plan.days.findIndex((d) => d.weekday === draft.weekday && d.title === draft.dayTitle) : -1;
   const week = weeklyProgress(sessions, plan.days.length, new Date());
@@ -159,7 +217,13 @@ function PlanView({
   if (screen.kind === "profile") {
     return (
       <div className="app">
-        <ProfileScreen profile={profile} onChange={onChange} onEdit={onEdit} onReset={onReset} />
+        <ProfileScreen
+          profile={profile}
+          onChange={onChange}
+          onEdit={onEdit}
+          onReset={onReset}
+          backup={<BackupCard profile={profile} sessions={sessions} draft={draft} onRestore={onRestore} onUndoRestore={onUndoRestore} />}
+        />
         {tab("profile")}
       </div>
     );
@@ -297,7 +361,7 @@ function PlanView({
                     className="icon-btn"
                     title="Swap for a different exercise"
                     aria-label={`Swap out ${ex.name}`}
-                    onClick={() => onChange({ ...profile, excluded: [...excluded, ex.name] })}
+                    onClick={() => swapOut(ex.name)}
                   >
                     ⇄
                   </button>
@@ -337,6 +401,21 @@ function PlanView({
           <p><strong>Cool-down:</strong> {plan.coolDown}</p>
         </div>
       </details>
+      {undoSwap && (
+        <div className="toast" role="status">
+          <span>{undoSwap} removed from your plan.</span>
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              onChange({ ...profile, excluded: excluded.filter((n) => n !== undoSwap) });
+              setUndoSwap(undefined);
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
       {tab("plan")}
     </div>
   );
@@ -384,11 +463,13 @@ function ProfileScreen({
   onChange,
   onEdit,
   onReset,
+  backup,
 }: {
   profile: UserProfile;
   onChange: (profile: UserProfile) => void;
   onEdit: () => void;
   onReset: () => void;
+  backup: ReactNode;
 }) {
   const excluded = profile.excluded ?? [];
   const [confirmReset, setConfirmReset] = useState(false);
@@ -435,8 +516,10 @@ function ProfileScreen({
             </button>
           ))}
         </div>
-        <p className="muted">Changing units doesn't convert weights you've already logged.</p>
+        <UnitsMigrationNotice />
       </div>
+
+      {backup}
 
       <div className="card">
         <h2>Removed exercises</h2>

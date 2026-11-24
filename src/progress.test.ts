@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PlannedExercise } from "./planner";
 import { cyclePosition, exerciseSeries, nextTarget, personalBests, sessionVolume, suggestions, weeklyProgress } from "./progress";
-import type { ExerciseLog, Feeling, SessionLog } from "./workoutLog";
+import { matchDraftEntries, type ExerciseLog, type Feeling, type SessionLog } from "./workoutLog";
 
 const squat: PlannedExercise = { name: "Back Squat", pattern: "squat", sets: 3, reps: "8–12", restSeconds: 90, progression: "" };
 const curl: PlannedExercise = { name: "Dumbbell Curl", pattern: "biceps", sets: 2, reps: "10–15", restSeconds: 60, progression: "" };
@@ -150,5 +150,70 @@ describe("personalBests", () => {
 describe("sessionVolume", () => {
   it("sums weight × reps for weighted exercises only", () => {
     expect(sessionVolume({ exercises: [{ name: "Back Squat", weight: 60, values: [10, 8] }, { name: "Push-Up", values: [20] }] })).toBe(1080);
+  });
+});
+
+describe("matchDraftEntries", () => {
+  const entry = (name: string, sets: number) => ({ name, weight: "60", sets: Array.from({ length: sets }, () => ({ value: "8", done: true })), trouble: false });
+  const draft = { weekday: "Mon", dayTitle: "Upper Body", startedAt: 0, entries: [entry("Barbell Bench Press", 4), entry("Pull-Up", 4)] };
+
+  it("keeps entries by exercise name, even if the order changed", () => {
+    const matched = matchDraftEntries(draft, [{ name: "Pull-Up", sets: 4 }, { name: "Barbell Bench Press", sets: 4 }]);
+    expect(matched.map((e) => e?.name)).toEqual(["Pull-Up", "Barbell Bench Press"]);
+  });
+
+  it("starts swapped-in exercises and changed set counts fresh", () => {
+    const matched = matchDraftEntries(draft, [{ name: "Dumbbell Bench Press", sets: 4 }, { name: "Pull-Up", sets: 3 }]);
+    expect(matched).toEqual([undefined, undefined]);
+  });
+
+  it("drops entries saved before names were recorded", () => {
+    const old = { ...draft, entries: draft.entries.map(({ name: _name, ...rest }) => rest) } as unknown as typeof draft;
+    expect(matchDraftEntries(old, [{ name: "Pull-Up", sets: 4 }])).toEqual([undefined]);
+  });
+});
+
+describe("kg/lb handling", () => {
+  const kg = (weight: number, values: number[]): ExerciseLog => ({ name: "Back Squat", weight, unit: "kg", values });
+
+  it("shows 100 kg as about 220 lb after switching, and back as 100 kg", () => {
+    const sessions = [session("2026-10-01", [kg(100, [10, 9, 8])])];
+    expect(exerciseSeries("Back Squat", sessions, "lb")).toMatchObject({
+      measure: "Weight (lb)",
+      points: [{ value: 220.5, detail: "220.5 lb × 10, 9, 8" }],
+    });
+    expect(exerciseSeries("Back Squat", sessions, "kg").points[0]).toMatchObject({ value: 100, detail: "100 kg × 10, 9, 8" });
+  });
+
+  it("suggests loadable weights in the new unit", () => {
+    // Same weight, one more rep: 220.46 lb rounds to a barbell-loadable 220.
+    expect(nextTarget(squat, [session("2026-10-01", [kg(100, [10, 9, 8])])], "lb")).toMatchObject({ weight: 220, text: "220 lb × 9", why: "repeat" });
+    // Top of the range: up one lower-body step from the rounded weight.
+    expect(nextTarget(squat, [session("2026-10-01", [kg(100, [12, 12, 12])])], "lb")).toMatchObject({ weight: 230, text: "230 lb × 8", why: "up" });
+    // Plateau at 100 kg: 90% is 198.4 lb, rounded to the nearest 5 lb.
+    const stalled = [session("2026-10-01", [kg(100, [9, 9, 8])]), session("2026-10-03", [kg(100, [9, 8, 8])])];
+    expect(nextTarget(squat, stalled, "lb")).toMatchObject({ weight: 200, text: "200 lb × 8", why: "backOff" });
+    // Switching back gives the original numbers.
+    expect(nextTarget(squat, [session("2026-10-01", [kg(100, [10, 9, 8])])], "kg")).toMatchObject({ weight: 100, text: "100 kg × 9" });
+  });
+
+  it("rounds barbell back-offs to 2.5 kg", () => {
+    const stalled = [session("2026-10-01", [kg(85, [9, 9, 8])]), session("2026-10-03", [kg(85, [9, 8, 8])])];
+    expect(nextTarget(squat, stalled, "kg")).toMatchObject({ weight: 77.5, why: "backOff" });
+  });
+
+  it("treats the same load logged in different units as a plateau", () => {
+    const mixed = [
+      session("2026-10-01", [kg(100, [9, 9, 8])]),
+      session("2026-10-03", [{ name: "Back Squat", weight: 220.5, unit: "lb", values: [9, 8, 8] }]),
+    ];
+    expect(nextTarget(squat, mixed, "lb")?.why).toBe("backOff");
+  });
+
+  it("compares personal bests and volume across units", () => {
+    const earlier = [session("2026-10-01", [kg(100, [5])])];
+    expect(personalBests({ exercises: [{ name: "Back Squat", weight: 225, unit: "lb", values: [5] }] }, earlier, "lb")).toEqual(["Back Squat"]);
+    expect(personalBests({ exercises: [{ name: "Back Squat", weight: 220, unit: "lb", values: [5] }] }, earlier, "lb")).toEqual([]);
+    expect(sessionVolume({ exercises: [kg(100, [10])] }, "lb")).toBeCloseTo(2204.62, 1);
   });
 });
